@@ -1,3 +1,4 @@
 /Predictor/CNN multitarget/*.pth
 /Predictor/CNN One Target/*.pth
 /Predictor/Flattened/*.pth
+/Predictor/ViT/Multiclass/*.pth
