@@ -123,7 +123,7 @@ def join_simulationData():
     
 
 # Load Model
-def loadModel():
+def loadModel(device):
 
     fwd_test = Stack.Predictor_CNN(cond_input_size=parser.condition_len, 
                                 ngpu=0, image_size=parser.image_size ,
@@ -131,7 +131,7 @@ def loadModel():
                                 features_num=1000,hiden_num=1000, #Its working with hiden nums. Features in case and extra linear layer
                                 dropout=0.2, 
                                 Y_prediction_size=601) #size of the output vector in this case frenquency points
-
+    fwd_test.to(device)
     fwd_test.apply(weights_init)
 
 
@@ -175,7 +175,7 @@ class CLIPTextEmbedder(nn.Module):
 
 
 # Conditioning
-def set_conditioning(target,path,categories,clipEmbedder,df):
+def set_conditioning(target,path,categories,clipEmbedder,df,device):
     
     arr=[]
 
@@ -247,8 +247,9 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
         
         for data in tqdm(dataloader):
             
-            inputs, classes, names, classes_types = data.to(device)
-            
+            inputs, classes, names, classes_types = data
+            inputs=inputs.to(device)
+
             opt.zero_grad()
             #Loading data
             a = []
@@ -269,7 +270,7 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
             a=np.array(a)     
 
 
-            array, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df)
+            array, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
             #conditioningArray=torch.FloatTensor(array)
             
             if embedded.shape[2]==parser.condition_len:
@@ -321,9 +322,9 @@ def main():
     arguments()
     join_simulationData()  
 
-    fwd_test, opt, criterion=loadModel()
+    fwd_test, opt, criterion=loadModel(device)
 
-    ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14", device="cuda:0", max_length = parser.batch_size)
+    ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14", max_length = parser.batch_size).to(device)
 
     running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
