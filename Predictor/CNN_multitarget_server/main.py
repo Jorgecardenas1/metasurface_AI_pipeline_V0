@@ -34,6 +34,10 @@ from tqdm.notebook import tqdm
 
 import argparse
 
+import json
+
+
+
 # Clip 
 from typing import List
 
@@ -48,6 +52,14 @@ torch.manual_seed(90)
 
 # Arguments
 parser = argparse.ArgumentParser()
+boxImagesPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Images Jorge Cardenas 512\\"
+DataPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Exports\\output\\"
+simulationData="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\DBfiles\\"
+
+Substrates={"Rogers RT/duroid 5880 (tm)":0}
+Materials={"copper":0,"pec":1}
+Surfacetypes={"Reflective":0,"Transmissive":1}
+TargetGeometries={"circ":0,"box":1, "cross":2}
 
 def arguments():
 
@@ -79,11 +91,11 @@ def arguments():
 
 
 # Images loading
-def load_images():
-    boxImagesPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Images Jorge Cardenas 512\\"
-    DataPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Exports\\output\\"
-    simulationData="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\DBfiles\\"
     
+
+def load_images():
+    pass
+
 def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv2d') != -1:
@@ -91,6 +103,17 @@ def weights_init(m):
     elif classname.find('BatchNorm') != -1:
         nn.init.normal_(m.weight.data, 1.0, 0.02)
         nn.init.constant_(m.bias.data, 0)
+
+# Data pre-processing
+def join_simulationData():
+    df = pd.DataFrame()
+
+    for file in glob.glob(simulationData+"*.csv"): 
+        df2 = pd.read_csv(file)
+        df = pd.concat([df, df2], ignore_index=True)
+    
+    df.to_csv('out.csv',index=False)
+    
 
 # Load Model
 def loadModel():
@@ -143,9 +166,59 @@ class CLIPTextEmbedder(nn.Module):
         # Get CLIP embeddings
         return self.transformer(input_ids=tokens).last_hidden_state
 
+
+# Conditioning
+def set_conditioning(target,path,categories):
+    df = pd.read_csv("out.csv")
+    arr=[]
+
+    for idx,name in enumerate(path):
+        series=name.split('_')[-1].split('.')[0]
+        batch=name.split('_')[4]
+        iteration=series.split('-')[-1]
+        row=df[(df['sim_id']==batch) & (df['iteration']==int(iteration))  ]
+
+        
+        target_val=target[idx]
+        category=categories[idx]
+        geometry=TargetGeometries[category]
+        
+        """"
+        surface type: reflective, transmissive
+        layers: conductor and conductor material / Substrate information
+        """
+        surfacetype=row["type"].values[0]
+        surfacetype=Surfacetypes[surfacetype]
+        
+        layers=row["layers"].values[0]
+        layers= layers.replace("'", '"')
+        layer=json.loads(layers)
+        
+        materialconductor=Materials[layer['conductor']['material']]
+        materialsustrato=Substrates[layer['substrate']['material']]
+        
+        
+        if (target_val==2): #is cross. Because an added variable to the desing 
+            
+            sustratoHeight= json.loads(row["paramValues"].values[0])
+            sustratoHeight= sustratoHeight[-2]
+        else:
+        
+            sustratoHeight= json.loads(row["paramValues"].values[0])
+            sustratoHeight= sustratoHeight[-1]
+        
+        arr.append([geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,1,1,1,1,1])
+    
+        datos=" ".join([str(element) for element in  [geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,1,1,1,1,1]])
+        embedding=ClipEmbedder(prompts=(datos))
+        
+    return arr, embedding
+
 def main():
     print("Access main")
     arguments()
+    join_simulationData()  
+
     fwd_test, opt, criterion=loadModel()
     # print(fwd_test)
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14", device="cuda:0", max_length = parser.batch_size)
