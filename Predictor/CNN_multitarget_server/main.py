@@ -66,6 +66,8 @@ Materials={"copper":0,"pec":1}
 Surfacetypes={"Reflective":0,"Transmissive":1}
 TargetGeometries={"circ":0,"box":1, "cross":2}
 
+
+
 def arguments():
 
     parser.add_argument("run_name",type=str)
@@ -221,7 +223,7 @@ def set_conditioning(target,path,categories,clipEmbedder,df):
 
 
 
-def train(opt,criterion,fwd_test, clipEmbedder):
+def train(opt,criterion,fwd_test, clipEmbedder,device):
     #### #File reading conf
 
     a = []
@@ -245,7 +247,7 @@ def train(opt,criterion,fwd_test, clipEmbedder):
         
         for data in tqdm(dataloader):
             
-            inputs, classes, names, classes_types = data
+            inputs, classes, names, classes_types = data.to(device)
             
             opt.zero_grad()
             #Loading data
@@ -315,6 +317,7 @@ def train(opt,criterion,fwd_test, clipEmbedder):
 
 def main():
     print("Access main")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     arguments()
     join_simulationData()  
 
@@ -322,7 +325,7 @@ def main():
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14", device="cuda:0", max_length = parser.batch_size)
 
-    running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder)
+    running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
     PATH = './trainedModelTM_abs_12March.pth'
     torch.save(fwd_test.state_dict(), PATH)
