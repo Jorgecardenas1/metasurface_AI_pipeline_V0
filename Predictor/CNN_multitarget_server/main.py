@@ -8,7 +8,7 @@ from druida import Stack
 from druida import setup
 
 from druida.DataManager import datamanager
-from druidaHFSS.modules import tools
+#from druidaHFSS.modules import tools
 from druida.tools import utils
 
 import random
@@ -63,12 +63,11 @@ def arguments():
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
     categories=["box", "circle", "cross"]
-    print(categories)
 
 
 
 def main():
-    print("main")
+    print("Access main")
     arguments()
     
 if __name__ == "__main__":
