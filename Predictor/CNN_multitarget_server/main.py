@@ -52,9 +52,14 @@ torch.manual_seed(90)
 
 # Arguments
 parser = argparse.ArgumentParser()
-boxImagesPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Images Jorge Cardenas 512\\"
-DataPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Exports\\output\\"
-simulationData="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\DBfiles\\"
+# boxImagesPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Images Jorge Cardenas 512\\"
+# DataPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Exports\\output\\"
+# simulationData="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\DBfiles\\"
+
+boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
+DataPath="../../../data/MetasufacesData/Exports/output/"
+simulationData="../../../data/MetasufacesData/DBfiles/"
+
 
 Substrates={"Rogers RT/duroid 5880 (tm)":0}
 Materials={"copper":0,"pec":1}
@@ -107,8 +112,8 @@ def weights_init(m):
 # Data pre-processing
 def join_simulationData():
     df = pd.DataFrame()
-
     for file in glob.glob(simulationData+"*.csv"): 
+        print(file)
         df2 = pd.read_csv(file)
         df = pd.concat([df, df2], ignore_index=True)
     
@@ -168,8 +173,8 @@ class CLIPTextEmbedder(nn.Module):
 
 
 # Conditioning
-def set_conditioning(target,path,categories):
-    df = pd.read_csv("out.csv")
+def set_conditioning(target,path,categories,clipEmbedder,df):
+    
     arr=[]
 
     for idx,name in enumerate(path):
@@ -210,9 +215,103 @@ def set_conditioning(target,path,categories):
         arr.append([geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,1,1,1,1,1])
     
         datos=" ".join([str(element) for element in  [geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,1,1,1,1,1]])
-        embedding=ClipEmbedder(prompts=(datos))
+        embedding=clipEmbedder(prompts=(datos))
         
     return arr, embedding
+
+
+
+def train(opt,criterion,fwd_test, clipEmbedder):
+    #### #File reading conf
+
+    a = []
+    idx=0
+    iters=0
+    loss_values, valid_loss_list = [], []
+    acc,acc_val=[], []
+    df = pd.read_csv("out.csv")
+
+    for epoch in range(parser.epochs):
+        x=0
+        running_loss = 0.0
+        i=0
+        acc_val=[]
+        print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
+        print('-' * 10)
+        
+        
+        dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,0.99, boxImagesPath,parser.batch_size,drop_last=True)
+
+        
+        for data in tqdm(dataloader):
+            
+            inputs, classes, names, classes_types = data
+            
+            opt.zero_grad()
+            #Loading data
+            a = []
+            idx=0
+            
+            """lookup for data corresponding to every image in training batch"""
+            for name in names:
+                series=name.split('_')[-1].split('.')[0]
+                batch=name.split('_')[4]
+                for name in glob.glob(DataPath+batch+'\\files\\'+'/'+parser.metricType+'*'+series+'.csv'): 
+                    
+                    #loading the absorption data
+                    train = pd.read_csv(name)
+                    values=np.array(train.values.T)
+                    a.append(values[1])
+                    
+                    
+            a=np.array(a)     
+
+
+            array, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df)
+            #conditioningArray=torch.FloatTensor(array)
+            
+            if embedded.shape[2]==parser.condition_len:
+                
+            
+                conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
+
+                y_predicted=fwd_test(input_=inputs, conditioning=conditioningTensor, b_size=inputs.shape[0])
+                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
+                
+                y_truth = torch.tensor(a)
+                
+            
+                errD_real = criterion(y_predicted.float(), y_truth.float())
+                errD_real.backward()
+                loss=errD_real.item()
+                opt.step()
+                scale = torch.tensor([10.0])
+
+                running_loss +=loss*inputs.size(0)
+                acc_val= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean()
+
+                x += 1
+                i = i+1
+
+
+                if i % 10 == 5:    # print every 2000 mini-batches
+                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {loss / 10:.3f} running loss:  {running_loss / 10:.3f}')
+                    print(f'accuracy: {acc_val.mean() :.3f} ')
+
+                iters += 1
+            else:
+            
+                break
+        
+        loss_values.append(running_loss)
+        acc.append(acc_val.mean())
+
+    
+    return running_loss,loss_values,acc
+
+
+
+
 
 def main():
     print("Access main")
@@ -220,9 +319,17 @@ def main():
     join_simulationData()  
 
     fwd_test, opt, criterion=loadModel()
-    # print(fwd_test)
+
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14", device="cuda:0", max_length = parser.batch_size)
 
-    
+    running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder)
+
+    PATH = './trainedModelTM_abs_12March.pth'
+    torch.save(fwd_test.state_dict(), PATH)
+
+    np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
+    np.savetxt('acc_TM_12March.out', acc, delimiter=',')
+    np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
+
 if __name__ == "__main__":
     main()
