@@ -259,7 +259,6 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
                 series=name.split('_')[-1].split('.')[0]
                 batch=name.split('_')[4]
                 for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
-                    print(name)
                     #loading the absorption data
                     train = pd.read_csv(name)
                     values=np.array(train.values.T)
@@ -330,12 +329,12 @@ def main():
 
     running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    PATH = './trainedModelTM_abs_12March.pth'
+    PATH = '/trainedModelTM_abs_12March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
-    np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
-    np.savetxt('acc_TM_12March.out', acc, delimiter=',')
-    np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
+    np.savetxt('/loss_ABS_TM_12March.out', loss_values, delimiter=',')
+    np.savetxt('/acc_TM_12March.out', acc, delimiter=',')
+    np.savetxt('/runninLoss_TM_12March.out', running_loss, delimiter=',')
 
 if __name__ == "__main__":
     main()
