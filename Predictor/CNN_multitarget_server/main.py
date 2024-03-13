@@ -254,13 +254,12 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
             #Loading data
             a = []
             idx=0
-            
             """lookup for data corresponding to every image in training batch"""
             for name in names:
                 series=name.split('_')[-1].split('.')[0]
                 batch=name.split('_')[4]
-                for name in glob.glob(DataPath+batch+'\\files\\'+'/'+parser.metricType+'*'+series+'.csv'): 
-                    
+                for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
+                    print(name)
                     #loading the absorption data
                     train = pd.read_csv(name)
                     values=np.array(train.values.T)
@@ -278,10 +277,10 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
             
                 conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
 
-                y_predicted=fwd_test(input_=inputs, conditioning=conditioningTensor, b_size=inputs.shape[0])
-                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
+                y_predicted=fwd_test(input_=inputs, conditioning=conditioningTensor.to(device), b_size=inputs.shape[0])
+                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1).to(device)
                 
-                y_truth = torch.tensor(a)
+                y_truth = torch.tensor(a).to(device)
                 
             
                 errD_real = criterion(y_predicted.float(), y_truth.float())
@@ -317,8 +316,11 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
 
 
 def main():
+    os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
+
     print("Access main")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
     arguments()
     join_simulationData()  
 
