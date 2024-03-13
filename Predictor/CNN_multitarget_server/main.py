@@ -126,14 +126,13 @@ def join_simulationData():
 def loadModel(device):
 
     fwd_test = Stack.Predictor_CNN(cond_input_size=parser.condition_len, 
-                                ngpu=0, image_size=parser.image_size ,
+                                ngpu=1, image_size=parser.image_size ,
                                 output_size=8, channels=3,
                                 features_num=1000,hiden_num=1000, #Its working with hiden nums. Features in case and extra linear layer
                                 dropout=0.2, 
                                 Y_prediction_size=601) #size of the output vector in this case frenquency points
-    fwd_test.to(device)
+    
     fwd_test.apply(weights_init)
-
 
     """using weigth decay regularization"""
     opt = optimizer.Adam(fwd_test.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
@@ -154,11 +153,13 @@ class CLIPTextEmbedder(nn.Module):
         """
         super().__init__()
         # Load the tokenizer
-        self.tokenizer = CLIPTokenizer.from_pretrained(version)
+        self.tokenizer = CLIPTokenizer.from_pretrained(version,device_map = device)
         # Load the CLIP transformer
-        self.transformer = CLIPTextModel.from_pretrained(version).eval()
+        self.transformer = CLIPTextModel.from_pretrained(version,device_map = device).eval()
 
         self.device = device
+
+        print(self.device)
         self.max_length = max_length
 
     def forward(self, prompts: List[str]):
@@ -167,9 +168,9 @@ class CLIPTextEmbedder(nn.Module):
         """
         # Tokenize the prompts
         batch_encoding = self.tokenizer(prompts, truncation=True, max_length=self.max_length, return_length=True,
-                                        return_overflowing_tokens=False, padding="max_length", return_tensors="pt")
+                                        return_overflowing_tokens=False, padding="max_length", return_tensors="pt").to(self.device)
         # Get token ids
-        tokens = batch_encoding["input_ids"].to(self.device)
+        tokens = batch_encoding["input_ids"]
         # Get CLIP embeddings
         return self.transformer(input_ids=tokens).last_hidden_state
 
@@ -248,8 +249,9 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
         for data in tqdm(dataloader):
             
             inputs, classes, names, classes_types = data
-            inputs=inputs.to(device)
-
+            inputs = inputs.to(device)
+            classes = classes.to(device)
+            
             opt.zero_grad()
             #Loading data
             a = []
@@ -258,6 +260,7 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
             for name in names:
                 series=name.split('_')[-1].split('.')[0]
                 batch=name.split('_')[4]
+
                 for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
                     #loading the absorption data
                     train = pd.read_csv(name)
@@ -267,8 +270,9 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
                     
             a=np.array(a)     
 
-
+            
             array, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
+            embedded=embedded.to(device)
             #conditioningArray=torch.FloatTensor(array)
             
             if embedded.shape[2]==parser.condition_len:
@@ -276,8 +280,10 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
             
                 conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
 
-                y_predicted=fwd_test(input_=inputs, conditioning=conditioningTensor.to(device), b_size=inputs.shape[0])
-                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1).to(device)
+                y_predicted=fwd_test(input_=inputs, conditioning=conditioningTensor.to(device) ,b_size=inputs.shape[0])
+                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
+                
+                y_predicted=y_predicted.to(device)
                 
                 y_truth = torch.tensor(a).to(device)
                 
@@ -285,14 +291,15 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
                 errD_real = criterion(y_predicted.float(), y_truth.float())
                 errD_real.backward()
                 loss=errD_real.item()
+
                 opt.step()
-                scale = torch.tensor([10.0])
+                # scale = torch.tensor([10.0])
 
                 running_loss +=loss*inputs.size(0)
                 acc_val= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean()
 
                 x += 1
-                i = i+1
+                i += 1
 
 
                 if i % 10 == 5:    # print every 2000 mini-batches
@@ -318,23 +325,27 @@ def main():
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
 
     print("Access main")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
     print(device)
+
     arguments()
     join_simulationData()  
 
     fwd_test, opt, criterion=loadModel(device)
+    fwd_test = fwd_test.to(device)
 
-    ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14", max_length = parser.batch_size).to(device)
+    ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
     running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    PATH = '/trainedModelTM_abs_12March.pth'
+    PATH = 'trainedModelTM_abs_12March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
-    np.savetxt('/loss_ABS_TM_12March.out', loss_values, delimiter=',')
-    np.savetxt('/acc_TM_12March.out', acc, delimiter=',')
-    np.savetxt('/runninLoss_TM_12March.out', running_loss, delimiter=',')
+    np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
+    np.savetxt('acc_TM_12March.out', acc, delimiter=',')
+    np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
 
 if __name__ == "__main__":
     main()
