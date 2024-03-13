@@ -81,7 +81,7 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 1
+    parser.epochs = 20
     parser.batch_size = 5
     parser.workers=0
     parser.gpu_number=0
@@ -127,7 +127,7 @@ def loadModel(device):
     fwd_test = Stack.Predictor_CNN(cond_input_size=parser.condition_len, 
                                 ngpu=1, image_size=parser.image_size ,
                                 output_size=8, channels=3,
-                                features_num=1000,hiden_num=1000, #Its working with hiden nums. Features in case and extra linear layer
+                                features_num=1000,hiden_num=3000, #Its working with hiden nums. Features in case and extra linear layer
                                 dropout=0.2, 
                                 Y_prediction_size=601) #size of the output vector in this case frenquency points
     
@@ -242,7 +242,7 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
         print('-' * 10)
         
         
-        dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,0.99, boxImagesPath,parser.batch_size,drop_last=True)
+        dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,0.98, boxImagesPath,parser.batch_size,drop_last=True)
 
         
         for data in tqdm(dataloader):
@@ -321,6 +321,7 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
 
 
 def main():
+
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
 
     print("Access main")
@@ -330,6 +331,7 @@ def main():
     print(device)
 
     arguments()
+
     join_simulationData()  
 
     fwd_test, opt, criterion=loadModel(device)
