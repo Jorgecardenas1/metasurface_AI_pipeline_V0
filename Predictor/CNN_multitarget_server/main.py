@@ -311,7 +311,7 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
                 break
         
         loss_values.append(running_loss)
-        acc.append(acc_val.mean())
+        acc.append(acc_val.cpu().mean())
 
     
     return running_loss,loss_values,acc
@@ -342,9 +342,21 @@ def main():
     PATH = 'trainedModelTM_abs_12March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
-    np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
-    np.savetxt('acc_TM_12March.out', acc, delimiter=',')
-    np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
+    try:
+        np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
+        
+    except:
+        np.savetxt('loss_ABS_TM_12March.out', [], delimiter=',')
+
+    try:
+        np.savetxt('acc_TM_12March.out', acc, delimiter=',')
+    except:
+        np.savetxt('acc_TM_12March.out', [], delimiter=',')
+    
+    try:
+        np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
+    except:
+        np.savetxt('runninLoss_TM_12March.out', [], delimiter=',')
 
 if __name__ == "__main__":
     main()
