@@ -115,7 +115,6 @@ def weights_init(m):
 def join_simulationData():
     df = pd.DataFrame()
     for file in glob.glob(simulationData+"*.csv"): 
-        print(file)
         df2 = pd.read_csv(file)
         df = pd.concat([df, df2], ignore_index=True)
     
@@ -302,7 +301,7 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
                 i += 1
 
 
-                if i % 10 == 5:    # print every 2000 mini-batches
+                if i % 300 == 5:    # print every 2000 mini-batches
                     print(f'[{epoch + 1}, {i + 1:5d}] loss: {loss / 10:.3f} running loss:  {running_loss / 10:.3f}')
                     print(f'accuracy: {acc_val.mean() :.3f} ')
 
