@@ -81,14 +81,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 20
+    parser.epochs = 30
     parser.batch_size = 5
     parser.workers=0
-    parser.gpu_number=0
+    parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate = 5e-6
+    parser.learning_rate = 1e-6
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
