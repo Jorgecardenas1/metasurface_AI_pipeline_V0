@@ -81,16 +81,16 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 20
+    parser.epochs = 30
     parser.batch_size = 5
     parser.workers=0
-    parser.gpu_number=0
+    parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate = 5e-6
+    parser.learning_rate = 1e-6
     parser.condition_len = 768
-    parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
+    parser.metricType='AbsorbanceTE' #this is to be modified when training for different metrics.
 
     categories=["box", "circle", "cross"]
 
@@ -341,24 +341,24 @@ def main():
 
     running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    PATH = 'trainedModelTM_abs_12March.pth'
+    PATH = 'trainedModelTE_abs_12March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
-        np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
+        np.savetxt('loss_ABS_TE_12March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('loss_ABS_TM_12March.out', [], delimiter=',')
+        np.savetxt('loss_ABS_TE_12March.out', [], delimiter=',')
 
     try:
-        np.savetxt('acc_TM_12March.out', acc, delimiter=',')
+        np.savetxt('acc_TE_12March.out', acc, delimiter=',')
     except:
-        np.savetxt('acc_TM_12March.out', [], delimiter=',')
+        np.savetxt('acc_TE_12March.out', [], delimiter=',')
     
     try:
-        np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
+        np.savetxt('runninLoss_TE_12March.out', running_loss, delimiter=',')
     except:
-        np.savetxt('runninLoss_TM_12March.out', [], delimiter=',')
+        np.savetxt('runninLoss_TE_12March.out', [], delimiter=',')
 
 if __name__ == "__main__":
     main()
