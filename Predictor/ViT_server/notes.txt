@@ -1,0 +1,1 @@
+primera prueba con menos heads y 20 epocas

@@ -83,10 +83,10 @@ def arguments():
     parser.add_argument("image_size",type=int)
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 1
+    parser.epochs = 20
     parser.batch_size = 10
     parser.workers=0
-    parser.gpu_number=0
+    parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
@@ -103,8 +103,8 @@ def arguments():
             "batch_size":parser.batch_size,
             "embed_dim":  3 * (parser.patch_size)**2 ,
             "hidden_dim":  2*(3 * (parser.patch_size)**2),
-            "num_heads": 16, #probar menos
-            "num_layers": 8, #probar menos
+            "num_heads": 8, #probar menos
+            "num_layers": 4, #probar menos
             "patch_size": parser.patch_size,
             "num_channels": 3,
             "num_patches": (parser.image_size//parser.patch_size)**2,
