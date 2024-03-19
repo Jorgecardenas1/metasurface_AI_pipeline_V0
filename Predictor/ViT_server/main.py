@@ -120,14 +120,7 @@ def arguments():
 
     return model_kwargs
 
-# Data pre-processing
-def join_simulationData():
-    df = pd.DataFrame()
-    for file in glob.glob(simulationData+"*.csv"): 
-        df2 = pd.read_csv(file)
-        df = pd.concat([df, df2], ignore_index=True)
-    
-    df.to_csv('out.csv',index=False)
+
     
 def train(model):
     #### #File reading conf
@@ -285,7 +278,13 @@ def set_conditioning(target,path,categories):
     
     return arr
 
-
+def join_simulationData():
+    df = pd.DataFrame()
+    for file in glob.glob(simulationData+"*.csv"): 
+        df2 = pd.read_csv(file)
+        df = pd.concat([df, df2], ignore_index=True)
+    
+    df.to_csv('out.csv',index=False)
 
 def main():
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
@@ -302,24 +301,24 @@ def main():
 
     running_loss,loss_values,acc=train(vision_transformer)
 
-    PATH = 'trainedModelTM_abs_12March.pth'
+    PATH = 'trainedModelTM_abs_18March.pth'
     torch.save(vision_transformer.state_dict(), PATH)
 
     try:
-        np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
+        np.savetxt('loss_ABS_TM_18March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('loss_ABS_TM_12March.out', [], delimiter=',')
+        np.savetxt('loss_ABS_TM_18March.out', [], delimiter=',')
 
     try:
-        np.savetxt('acc_TM_12March.out', acc, delimiter=',')
+        np.savetxt('acc_TM_18March.out', acc, delimiter=',')
     except:
-        np.savetxt('acc_TM_12March.out', [], delimiter=',')
+        np.savetxt('acc_TM_18March.out', [], delimiter=',')
     
     try:
-        np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
+        np.savetxt('runninLoss_TM_18March.out', running_loss, delimiter=',')
     except:
-        np.savetxt('runninLoss_Tm_12March.out', [], delimiter=',')
+        np.savetxt('runninLoss_Tm_18March.out', [], delimiter=',')
 
 
 
