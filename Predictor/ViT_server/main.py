@@ -305,20 +305,20 @@ def main():
     torch.save(vision_transformer.state_dict(), PATH)
 
     try:
-        np.savetxt('loss_ABS_TM_18March.out', loss_values, delimiter=',')
+        np.savetxt('output/loss_ABS_TM_18March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('loss_ABS_TM_18March.out', [], delimiter=',')
+        np.savetxt('output/loss_ABS_TM_18March.out', [], delimiter=',')
 
     try:
-        np.savetxt('acc_TM_18March.out', acc, delimiter=',')
+        np.savetxt('output/acc_TM_18March.out', acc, delimiter=',')
     except:
-        np.savetxt('acc_TM_18March.out', [], delimiter=',')
+        np.savetxt('output/acc_TM_18March.out', [], delimiter=',')
     
     try:
-        np.savetxt('runninLoss_TM_18March.out', running_loss, delimiter=',')
+        np.savetxt('output/runninLoss_TM_18March.out', running_loss, delimiter=',')
     except:
-        np.savetxt('runninLoss_Tm_18March.out', [], delimiter=',')
+        np.savetxt('output/runninLoss_Tm_18March.out', [], delimiter=',')
 
 
 
