@@ -341,24 +341,24 @@ def main():
 
     running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    PATH = 'trainedModelTM_abs_12March.pth'
+    PATH = 'trainedModelTM_abs_19March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
-        np.savetxt('loss_ABS_TM_12March.out', loss_values, delimiter=',')
+        np.savetxt('loss_ABS_TM_19March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('loss_ABS_TM_12March.out', [], delimiter=',')
+        np.savetxt('loss_ABS_TM_19March.out', [], delimiter=',')
 
     try:
-        np.savetxt('acc_TM_12March.out', acc, delimiter=',')
+        np.savetxt('acc_TM_19March.out', acc, delimiter=',')
     except:
-        np.savetxt('acc_TM_12March.out', [], delimiter=',')
+        np.savetxt('acc_TM_19March.out', [], delimiter=',')
     
     try:
-        np.savetxt('runninLoss_TM_12March.out', running_loss, delimiter=',')
+        np.savetxt('runninLoss_TM_19March.out', running_loss, delimiter=',')
     except:
-        np.savetxt('runninLoss_TM_12March.out', [], delimiter=',')
+        np.savetxt('runninLoss_TM_19March.out', [], delimiter=',')
 
 if __name__ == "__main__":
     main()
