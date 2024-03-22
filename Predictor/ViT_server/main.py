@@ -58,6 +58,7 @@ print("Device:", device)
 
 parser = argparse.ArgumentParser()
 boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
+validationImages="../../../data/MetasufacesData/testImages/"
 DataPath="../../../data/MetasufacesData/Exports/output/"
 simulationData="../../../data/MetasufacesData/DBfiles/"
 
@@ -83,14 +84,14 @@ def arguments():
     parser.add_argument("image_size",type=int)
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 20
+    parser.epochs = 30
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate = 1e-4
+    parser.learning_rate = 1e-5
     parser.condition_len = 10
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
     parser.patch_size=16
@@ -124,10 +125,10 @@ def arguments():
     
 def train(model):
     #### #File reading conf
-    a = []
     iters=0
 
     dataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,0.99, boxImagesPath,parser.batch_size, drop_last=True)
+    vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,0.99, validationImages,10, drop_last=True)
 
     """using weigth decay regularization"""
     opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
@@ -141,13 +142,13 @@ def train(model):
         model.to(device)
 
     # prepare model fr training
-    model.train()
 
 
     for epoch in range(parser.epochs):
-        x=0
-        running_loss = 0.0
         i=0
+
+        running_loss = 0.
+        last_loss = 0.
         acc_val=[]
 
         print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
@@ -155,19 +156,21 @@ def train(model):
         
         #dataloader = utils.get_data_with_labels(512, 512,0.9, boxImagesPath,parser.batch_size,drop_last=True)
 
+        #Training
+        model.train()
 
         for data in tqdm(dataloader):
             
             #if parser.device!='cpu':
             images, classes, names, classes_types = data
-            print(device)
+            
             images = images.to(device)
             classes = classes.to(device)
             #else:
             #    images, classes, names, classes_types = data
 
                 
-            a = []
+            a = [] #array with truth values
             
             """lookup for data corresponding to every image in training batch"""
             for name in names:
@@ -181,25 +184,29 @@ def train(model):
                     a.append(values[1])
             
             a=np.array(a)     
-            #print(a.shape)
+
+
+            #Aun sin CLIP
             conditioningArray=torch.FloatTensor(set_conditioning(classes, names, classes_types))
             conditioningArray=conditioningArray.to(device)
 
+            #validation
             if conditioningArray.shape[1]==parser.condition_len:
                 
                 
                 opt.zero_grad()
 
                 #for conditioning in case required
-                outmap_min, _ = torch.min(conditioningArray, dim=1, keepdim=True)
-                outmap_max, _ = torch.max(conditioningArray, dim=1, keepdim=True)
-                conditioningTensor = (conditioningArray - outmap_min) / (outmap_max - outmap_min)
+                #outmap_min, _ = torch.min(conditioningArray, dim=1, keepdim=True)
+                #outmap_max, _ = torch.max(conditioningArray, dim=1, keepdim=True)
+                #conditioningTensor = (conditioningArray - outmap_min) / (outmap_max - outmap_min)
 
-                
+                conditioningArray = torch.nn.functional.normalize(conditioningArray, p=2.0, dim=-1, eps=1e-12, out=None)
                 # feedforward data
 
                 y_predicted = model(images,condition=conditioningArray)
                 y_predicted=y_predicted.to(device)
+                #y_predicted= F.softmax (y_predicted,dim=-1)
                 
                 y_truth = torch.tensor(a).to(device)
 
@@ -208,28 +215,79 @@ def train(model):
                 acc_val= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean()
                 
                 errD_real.backward()
-                loss=errD_real.item()
+
                 opt.step()
 
+                #Metrics
+                loss=errD_real.item()
                 running_loss +=loss
 
-                x += 1
-                i = i+1
+                i += 1
 
 
-                if i % 10 == 5:    # print every 2000 mini-batches
+                if i % 100 ==  99:    # print every 2000 mini-batches
                     print(f'[{epoch + 1}, {i + 1:5d}] loss: {loss / 10:.3f} running loss:  {running_loss / 10:.3f}')
                     print(f'accuracy: {acc_val.mean() :.3f} ')
+
+                    last_loss=running_loss / 100
+                    running_loss=0
                 iters += 1
             else:
             
                 break
-        loss_values.append(running_loss)
-        
+
+        loss_values.append(last_loss)
         acc.append(acc_val.mean())
 
+        #VAlidation
+        running_vloss = 0.0
+        # Set the model to evaluation mode, disabling dropout and using population
+        # statistics for batch normalization.
+        model.eval()
+
+        with torch.no_grad():
+
+            for vdata in tqdm(vdataloader):
+                images, classes, names, classes_types = data = vdata
+                
+
+                images = images.to(device)
+                classes = classes.to(device)
+
+            
+                a = [] #array with truth values
+                
+                """lookup for data corresponding to every image in training batch"""
+                for name in names:
+                    series=name.split('_')[-1].split('.')[0]
+                    batch=name.split('_')[4]
+
+                    for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
+                        #loading the absorption data
+                        train = pd.read_csv(name)
+                        values=np.array(train.values.T)
+                        a.append(values[1])
+                
+                a=np.array(a)  
+                #Aun sin CLIP
+                conditioningArray=torch.FloatTensor(set_conditioning(classes, names, classes_types))
+                conditioningArray=conditioningArray.to(device)
+
+                y_predicted = model(images,condition=conditioningArray)
+                y_predicted=y_predicted.to(device)
+                #y_predicted= F.softmax (y_predicted,dim=-1)
+                
+                y_truth = torch.tensor(a).to(device)
+
+                vloss = criterion(y_predicted.float(), y_truth.float())
+                running_vloss += vloss
+
+        valid_loss_list.append(running_vloss / (i + 1))
    
-    return running_loss,loss_values,acc
+    return running_loss,loss_values,acc,valid_loss_list
+
+def metrics():
+    pass
 
     
    
@@ -244,7 +302,7 @@ def set_conditioning(target,path,categories):
         batch=name.split('_')[4]
         iteration=series.split('-')[-1]
         row=df[(df['sim_id']==batch) & (df['iteration']==int(iteration))  ]
-
+        
         
         target_val=target[idx]
         category=categories[idx]
@@ -299,27 +357,31 @@ def main():
 
     vision_transformer.to(device)
 
-    running_loss,loss_values,acc=train(vision_transformer)
+    running_loss,loss_values,acc,valid_loss_list=train(vision_transformer)
 
-    PATH = 'trainedModelTM_abs_18March.pth'
+    PATH = 'trainedModelTM_abs_21March.pth'
     torch.save(vision_transformer.state_dict(), PATH)
 
     try:
-        np.savetxt('output/loss_ABS_TM_18March.out', loss_values, delimiter=',')
+        np.savetxt('output/loss_ABS_TM_21March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('output/loss_ABS_TM_18March.out', [], delimiter=',')
+        np.savetxt('output/loss_ABS_TM_21March.out', [], delimiter=',')
 
     try:
-        np.savetxt('output/acc_TM_18March.out', acc, delimiter=',')
+        np.savetxt('output/acc_TM_21March.out', acc, delimiter=',')
     except:
-        np.savetxt('output/acc_TM_18March.out', [], delimiter=',')
+        np.savetxt('output/acc_TM_21March.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/runninLoss_TM_18March.out', running_loss, delimiter=',')
+        np.savetxt('output/runninLoss_TM_21March.out', running_loss, delimiter=',')
     except:
-        np.savetxt('output/runninLoss_Tm_18March.out', [], delimiter=',')
+        np.savetxt('output/runninLoss_Tm_21March.out', [], delimiter=',')
 
+    try:
+        np.savetxt('output/ValidationAcc21March.out', valid_loss_list, delimiter=',')
+    except:
+        np.savetxt('output/ValidationAcc21March.out', [], delimiter=',')
 
 
 if __name__ == "__main__":
