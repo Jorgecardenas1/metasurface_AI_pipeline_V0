@@ -59,6 +59,7 @@ parser = argparse.ArgumentParser()
 boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
 DataPath="../../../data/MetasufacesData/Exports/output/"
 simulationData="../../../data/MetasufacesData/DBfiles/"
+validationImages="../../../data/MetasufacesData/testImages/"
 
 
 Substrates={"Rogers RT/duroid 5880 (tm)":0}
@@ -81,7 +82,7 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 30
+    parser.epochs = 1
     parser.batch_size = 5
     parser.workers=0
     parser.gpu_number=1
@@ -223,44 +224,61 @@ def set_conditioning(target,path,categories,clipEmbedder,df,device):
 
 
 
-def train(opt,criterion,fwd_test, clipEmbedder,device):
+def train(opt,criterion,model, clipEmbedder,device):
     #### #File reading conf
 
     a = []
-    idx=0
-    iters=0
+
+    loss_per_batch=0
+    loss_per_val_batch=0
     loss_values, valid_loss_list = [], []
-    acc,acc_val=[], []
+    acc=[]
+    acc_val=[]
+
     df = pd.read_csv("out.csv")
+    
+    dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,1, boxImagesPath,parser.batch_size,drop_last=True)
+    vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, validationImages,parser.batch_size, drop_last=True)
 
     for epoch in range(parser.epochs):
-        x=0
-        running_loss = 0.0
-        i=0
-        acc_val=[]
+        
+        i=0 #iteration
+        i_val=0 #running over validation set
+
+        running_loss = 0. 
+        epoch_loss = 0.
+        running_vloss = 0.0 #over validation set
+        total_correct = 0
+
+        
+        total_samples=0
+        total_samples_val=0.0
+        last_loss = 0.
+
         print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
         print('-' * 10)
-        
-        
-        dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,0.98, boxImagesPath,parser.batch_size,drop_last=True)
 
         
         for data in tqdm(dataloader):
             
             inputs, classes, names, classes_types = data
+
+            #sending to CUDA
             inputs = inputs.to(device)
             classes = classes.to(device)
             
             opt.zero_grad()
+
             #Loading data
             a = []
-            idx=0
+
             """lookup for data corresponding to every image in training batch"""
             for name in names:
                 series=name.split('_')[-1].split('.')[0]
                 batch=name.split('_')[4]
 
                 for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
+                    
                     #loading the absorption data
                     train = pd.read_csv(name)
                     values=np.array(train.values.T)
@@ -269,52 +287,116 @@ def train(opt,criterion,fwd_test, clipEmbedder,device):
                     
             a=np.array(a)     
 
+            """Creating a conditioning vector"""
             
-            array, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
+            _, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
+            
             embedded=embedded.to(device)
             #conditioningArray=torch.FloatTensor(array)
             
             if embedded.shape[2]==parser.condition_len:
-                
             
-                conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
-
-                y_predicted=fwd_test(input_=inputs, conditioning=conditioningTensor.to(device) ,b_size=inputs.shape[0])
-                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
-                
+                y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
+            
                 y_predicted=y_predicted.to(device)
                 
                 y_truth = torch.tensor(a).to(device)
                 
-            
-                errD_real = criterion(y_predicted.float(), y_truth.float())
+                errD_real = criterion(y_predicted.float(), y_truth.float())  
+
                 errD_real.backward()
-                loss=errD_real.item()
 
                 opt.step()
-                # scale = torch.tensor([10.0])
+    
+                # Metrics
+                # Accuracy
+                
 
-                running_loss +=loss*inputs.size(0)
-                acc_val= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean()
+                #predicted = torch.max(y_predicted, 1) #indice del máximo  
+                vals, idx_pred = y_predicted.topk(20)  
+                vals, idx_truth = y_truth.topk(20)  
 
-                x += 1
+                total_correct += (idx_pred == idx_truth).sum().item()
+                print(total_correct)
+                total_samples += y_truth.size(0)
+                acc_train = 100 * total_correct / total_samples
+
+                #Loss
+                loss_per_batch=errD_real.item()
+                running_loss +=loss_per_batch
+                epoch_loss+=loss_per_batch
                 i += 1
 
 
-                if i % 300 == 5:    # print every 2000 mini-batches
-                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {loss / 10:.3f} running loss:  {running_loss / 10:.3f}')
-                    print(f'accuracy: {acc_val.mean() :.3f} ')
+                if i % 100 ==  99:    # print every 2000 mini-batches
+                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {last_loss/len(dataloader) :.3f} running loss:  {running_loss/100:.3f}')
+                    print(f'accuracy: {acc_train :.3f} ')
+                    running_loss=0.0
 
-                iters += 1
-            else:
+            loss_values.append(epoch_loss/i)
+            acc.append(acc_train)
+            #print("train acc",acc)
             
-                break
-        
-        loss_values.append(running_loss)
-        acc.append(acc_val.cpu().mean())
 
+            """validation"""
+
+            # Set the model to evaluation mode, disabling dropout and using population
+            # statistics for batch normalization.
+            model.eval()
+
+            with torch.no_grad():
+                for vdata in tqdm(vdataloader):
+                    images, classes, names, classes_types = data = vdata
+                    
+
+                    images = images.to(device)
+                    classes = classes.to(device)
+
+                
+                    a = [] #array with truth values
+                    
+                    """lookup for data corresponding to every image in training batch"""
+                    for name in names:
+                        series=name.split('_')[-1].split('.')[0]
+                        batch=name.split('_')[4]
+
+                        for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
+                            #loading the absorption data
+                            train = pd.read_csv(name)
+                            values=np.array(train.values.T)
+                            a.append(values[1])
+                    
+                    a=np.array(a)  
+                    #Aun sin CLIP
+                    _,embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
+
+
+                    y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
+                    
+                    #Scaling and normalizing
+                    y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
+
+                    y_predicted=y_predicted.to(device)
+
+                    
+                    y_truth = torch.tensor(a).to(device)
+
+                    loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
+
+                    #Metrics
+                    # accurancy
+                    #total_samples_val += y_truth.size(0)
+
+                    #acc_val_ = 100 * total_correct / total_samples
+                    ## Loss
+                    running_vloss += loss_per_val_batch.item()
+
+                    i_val+=1
+            print("validation loss",running_vloss/i_val)
+            valid_loss_list.append(running_vloss/i_val)
+ 
     
-    return running_loss,loss_values,acc
+    return running_loss,loss_values,acc,valid_loss_list,acc_val
 
 
 
@@ -339,26 +421,26 @@ def main():
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
-    running_loss,loss_values,acc=train(opt,criterion,fwd_test,ClipEmbedder,device)
+    running_loss,loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
     PATH = 'trainedModelTM_abs_19March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
-        np.savetxt('loss_ABS_TM_19March.out', loss_values, delimiter=',')
+        np.savetxt('output/loss_Train_TM_21March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('loss_ABS_TM_19March.out', [], delimiter=',')
+        np.savetxt('output/loss_Train_TM_21March.out', [], delimiter=',')
 
     try:
-        np.savetxt('acc_TM_19March.out', acc, delimiter=',')
+        np.savetxt('output/acc_Train_TM_21March.out', acc, delimiter=',')
     except:
-        np.savetxt('acc_TM_19March.out', [], delimiter=',')
+        np.savetxt('output/acc_Train_TM_21March.out', [], delimiter=',')
     
     try:
-        np.savetxt('runninLoss_TM_19March.out', running_loss, delimiter=',')
+        np.savetxt('output/acc_val_21March.out', acc_val, delimiter=',')
     except:
-        np.savetxt('runninLoss_TM_19March.out', [], delimiter=',')
+        np.savetxt('output/acc_val_21March.out', [], delimiter=',')
 
 if __name__ == "__main__":
     main()

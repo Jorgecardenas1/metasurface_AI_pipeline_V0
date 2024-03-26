@@ -67,6 +67,9 @@ Substrates={"Rogers RT/duroid 5880 (tm)":0}
 Materials={"copper":0,"pec":1}
 Surfacetypes={"Reflective":0,"Transmissive":1}
 TargetGeometries={"circ":0,"box":1, "cross":2}
+metricType=['AbsorbanceTM','AbsorbanceTE' ]
+
+categories=["box", "circle", "cross"]
 
 def arguments():
 
@@ -84,21 +87,18 @@ def arguments():
     parser.add_argument("image_size",type=int)
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 30
+    parser.epochs = 1
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate = 1e-5
+    parser.learning_rate = 1e-6
     parser.condition_len = 10
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
     parser.patch_size=16
 
-    metricType=['AbsorbanceTM','AbsorbanceTE' ]
-
-    categories=["box", "circle", "cross"]
 
     model_kwargs={
             "batch_size":parser.batch_size,
@@ -125,17 +125,18 @@ def arguments():
     
 def train(model):
     #### #File reading conf
-    iters=0
 
-    dataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,0.99, boxImagesPath,parser.batch_size, drop_last=True)
-    vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,0.99, validationImages,10, drop_last=True)
 
     """using weigth decay regularization"""
     opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
     criterion = nn.CrossEntropyLoss()
 
+
+    loss_per_batch=0
+    loss_per_val_batch=0
     loss_values, valid_loss_list = [], []
     acc=[]
+    acc_val=[]
 
     
     if parser.device!='cpu':
@@ -145,11 +146,19 @@ def train(model):
 
 
     for epoch in range(parser.epochs):
+        dataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, boxImagesPath,parser.batch_size, drop_last=True)
+        vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, validationImages,10, drop_last=True)
+
         i=0
+        i_val=0
 
         running_loss = 0.
+        running_vloss = 0.0
+        total_correct = 0
+        
+        total_samples=0
+        total_samples_val=0.0
         last_loss = 0.
-        acc_val=[]
 
         print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
         print('-' * 10)
@@ -159,6 +168,7 @@ def train(model):
         #Training
         model.train()
 
+        """batch"""
         for data in tqdm(dataloader):
             
             #if parser.device!='cpu':
@@ -169,7 +179,6 @@ def train(model):
             #else:
             #    images, classes, names, classes_types = data
 
-                
             a = [] #array with truth values
             
             """lookup for data corresponding to every image in training batch"""
@@ -190,63 +199,68 @@ def train(model):
             conditioningArray=torch.FloatTensor(set_conditioning(classes, names, classes_types))
             conditioningArray=conditioningArray.to(device)
 
-            #validation
-            if conditioningArray.shape[1]==parser.condition_len:
+            #Train
+            #if conditioningArray.shape[1]==parser.condition_len:
                 
                 
-                opt.zero_grad()
+            opt.zero_grad()
 
-                #for conditioning in case required
-                #outmap_min, _ = torch.min(conditioningArray, dim=1, keepdim=True)
-                #outmap_max, _ = torch.max(conditioningArray, dim=1, keepdim=True)
-                #conditioningTensor = (conditioningArray - outmap_min) / (outmap_max - outmap_min)
+            #for conditioning in case required
+            #outmap_min, _ = torch.min(conditioningArray, dim=1, keepdim=True)
+            #outmap_max, _ = torch.max(conditioningArray, dim=1, keepdim=True)
+            #conditioningTensor = (conditioningArray - outmap_min) / (outmap_max - outmap_min)
 
-                conditioningArray = torch.nn.functional.normalize(conditioningArray, p=2.0, dim=-1, eps=1e-12, out=None)
-                # feedforward data
+            conditioningArray = torch.nn.functional.normalize(conditioningArray, p=2.0, dim=-1, eps=1e-12, out=None)
+            # feedforward data
 
-                y_predicted = model(images,condition=conditioningArray)
-                y_predicted=y_predicted.to(device)
-                #y_predicted= F.softmax (y_predicted,dim=-1)
-                
-                y_truth = torch.tensor(a).to(device)
-
-                errD_real = criterion(y_predicted.float(), y_truth.float())
-
-                acc_val= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean()
-                
-                errD_real.backward()
-
-                opt.step()
-
-                #Metrics
-                loss=errD_real.item()
-                running_loss +=loss
-
-                i += 1
-
-
-                if i % 100 ==  99:    # print every 2000 mini-batches
-                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {loss / 10:.3f} running loss:  {running_loss / 10:.3f}')
-                    print(f'accuracy: {acc_val.mean() :.3f} ')
-
-                    last_loss=running_loss / 100
-                    running_loss=0
-                iters += 1
-            else:
+            y_predicted = model(images,condition=conditioningArray)
+            y_predicted=y_predicted.to(device)
+            #y_predicted= F.softmax (y_predicted,dim=-1)
             
-                break
+            y_truth = torch.tensor(a).to(device)
 
-        loss_values.append(last_loss)
-        acc.append(acc_val.mean())
+            errD_real = criterion(y_predicted.float(), y_truth.float())                
+            errD_real.backward()
+            opt.step()
 
-        #VAlidation
-        running_vloss = 0.0
+            #Metrics
+            #acc_train= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean()
+
+            total_correct += (y_predicted == y_truth).sum().item()
+
+            loss_per_batch=errD_real.item()
+
+            total_samples += y_truth.size(0)
+            acc_train = 100 * total_correct / total_samples
+
+
+            last_loss=loss_per_batch 
+            running_loss +=last_loss
+
+            i += 1
+
+
+            if i % 100 ==  99:    # print every 2000 mini-batches
+                print(f'[{epoch + 1}, {i + 1:5d}] loss: {last_loss/i :.3f} running loss:  {running_loss/i:.3f}')
+                print(f'accuracy: {acc_train :.3f} ')
+
+            #else:
+
+               # break
+
+
+        loss_values.append(running_loss/i)
+        acc.append(acc_train)
+        print("train acc",acc)
+        
+
+        """validation"""
+
         # Set the model to evaluation mode, disabling dropout and using population
         # statistics for batch normalization.
         model.eval()
 
         with torch.no_grad():
-
             for vdata in tqdm(vdataloader):
                 images, classes, names, classes_types = data = vdata
                 
@@ -275,16 +289,30 @@ def train(model):
 
                 y_predicted = model(images,condition=conditioningArray)
                 y_predicted=y_predicted.to(device)
-                #y_predicted= F.softmax (y_predicted,dim=-1)
                 
                 y_truth = torch.tensor(a).to(device)
 
-                vloss = criterion(y_predicted.float(), y_truth.float())
-                running_vloss += vloss
+                i_val+=1
+                loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
+                running_vloss += loss_per_val_batch.item()
 
-        valid_loss_list.append(running_vloss / (i + 1))
-   
-    return running_loss,loss_values,acc,valid_loss_list
+                #Metrics
+
+                total_samples_val += y_truth.size(0)
+                acc_val_ = 100 * total_correct / total_samples
+
+
+                last_loss=loss_per_batch 
+                running_loss +=last_loss
+
+
+        valid_loss_list.append(running_vloss/i_val)
+        acc_val.append(acc_val_)
+        print("val vloss",running_vloss/i_val)
+        print("val loss list",valid_loss_list)
+        print("acclist",acc_val)
+
+    return running_loss,loss_values,acc,valid_loss_list,acc_val
 
 def metrics():
     pass
@@ -357,31 +385,26 @@ def main():
 
     vision_transformer.to(device)
 
-    running_loss,loss_values,acc,valid_loss_list=train(vision_transformer)
+    running_loss,loss_values,acc,valid_loss_list,acc_val=train(vision_transformer)
 
     PATH = 'trainedModelTM_abs_21March.pth'
     torch.save(vision_transformer.state_dict(), PATH)
 
     try:
-        np.savetxt('output/loss_ABS_TM_21March.out', loss_values, delimiter=',')
+        np.savetxt('output/loss_Train_TM_21March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('output/loss_ABS_TM_21March.out', [], delimiter=',')
+        np.savetxt('output/loss_Train_TM_21March.out', [], delimiter=',')
 
     try:
-        np.savetxt('output/acc_TM_21March.out', acc, delimiter=',')
+        np.savetxt('output/acc_Train_TM_21March.out', acc, delimiter=',')
     except:
-        np.savetxt('output/acc_TM_21March.out', [], delimiter=',')
+        np.savetxt('output/acc_Train_TM_21March.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/runninLoss_TM_21March.out', running_loss, delimiter=',')
+        np.savetxt('output/acc_val_21March.out', acc_val, delimiter=',')
     except:
-        np.savetxt('output/runninLoss_Tm_21March.out', [], delimiter=',')
-
-    try:
-        np.savetxt('output/ValidationAcc21March.out', valid_loss_list, delimiter=',')
-    except:
-        np.savetxt('output/ValidationAcc21March.out', [], delimiter=',')
+        np.savetxt('output/acc_val_21March.out', [], delimiter=',')
 
 
 if __name__ == "__main__":
