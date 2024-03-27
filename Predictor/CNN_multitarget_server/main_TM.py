@@ -45,7 +45,7 @@ from torch import nn
 from transformers import CLIPTokenizer, CLIPTextModel
 
 torch.set_printoptions(profile="full")
-torch.manual_seed(90)
+torch.manual_seed(999)
 
 
 
@@ -82,7 +82,7 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 1
+    parser.epochs = 30
     parser.batch_size = 5
     parser.workers=0
     parser.gpu_number=1
@@ -181,9 +181,13 @@ def set_conditioning(target,path,categories,clipEmbedder,df,device):
     arr=[]
 
     for idx,name in enumerate(path):
+        #print(name)
+
         series=name.split('_')[-1].split('.')[0]
         batch=name.split('_')[4]
         iteration=series.split('-')[-1]
+        #print(batch)
+        #print(iteration)
         row=df[(df['sim_id']==batch) & (df['iteration']==int(iteration))  ]
 
         
@@ -249,7 +253,8 @@ def train(opt,criterion,model, clipEmbedder,device):
         epoch_loss = 0.
         running_vloss = 0.0 #over validation set
         total_correct = 0
-
+        acc_validation=0.0
+        acc_train=0.0
         
         total_samples=0
         total_samples_val=0.0
@@ -276,10 +281,10 @@ def train(opt,criterion,model, clipEmbedder,device):
             for name in names:
                 series=name.split('_')[-1].split('.')[0]
                 batch=name.split('_')[4]
-
                 for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
                     
                     #loading the absorption data
+
                     train = pd.read_csv(name)
                     values=np.array(train.values.T)
                     a.append(values[1])
@@ -317,8 +322,8 @@ def train(opt,criterion,model, clipEmbedder,device):
                 vals, idx_truth = y_truth.topk(20)  
 
                 total_correct += (idx_pred == idx_truth).sum().item()
-                print(total_correct)
-                total_samples += y_truth.size(0)
+
+                total_samples += y_truth.size(0)*20
                 acc_train = 100 * total_correct / total_samples
 
                 #Loss
@@ -333,70 +338,76 @@ def train(opt,criterion,model, clipEmbedder,device):
                     print(f'accuracy: {acc_train :.3f} ')
                     running_loss=0.0
 
-            loss_values.append(epoch_loss/i)
-            acc.append(acc_train)
+        loss_values.append(epoch_loss/len(dataloader) )
+        acc.append(acc_train)
             #print("train acc",acc)
             
 
-            """validation"""
+        """validation"""
 
-            # Set the model to evaluation mode, disabling dropout and using population
-            # statistics for batch normalization.
-            model.eval()
+        # Set the model to evaluation mode, disabling dropout and using population
+        # statistics for batch normalization.
+        model.eval()
 
-            with torch.no_grad():
-                for vdata in tqdm(vdataloader):
-                    images, classes, names, classes_types = data = vdata
-                    
+        with torch.no_grad():
+            for vdata in tqdm(vdataloader):
+                images, classes, names, classes_types  = vdata
+                
 
-                    images = images.to(device)
-                    classes = classes.to(device)
+                images = images.to(device)
+                classes = classes.to(device)
+
+            
+                a = [] #array with truth values
+                
+                """lookup for data corresponding to every image in training batch"""
+                for name in names:
+                    series=name.split('_')[-1].split('.')[0]
+                    batch=name.split('_')[4]
+
+                    for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
+                        #loading the absorption data
+                        train = pd.read_csv(name)
+                        values=np.array(train.values.T)
+                        a.append(values[1])
+                
+                a=np.array(a)  
+                #Aun sin CLIP
+                _,embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
+
+
+                y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
+                
+                #Scaling and normalizing
+                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
+
+                y_predicted=y_predicted.to(device)
 
                 
-                    a = [] #array with truth values
-                    
-                    """lookup for data corresponding to every image in training batch"""
-                    for name in names:
-                        series=name.split('_')[-1].split('.')[0]
-                        batch=name.split('_')[4]
+                y_truth = torch.tensor(a).to(device)
 
-                        for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
-                            #loading the absorption data
-                            train = pd.read_csv(name)
-                            values=np.array(train.values.T)
-                            a.append(values[1])
-                    
-                    a=np.array(a)  
-                    #Aun sin CLIP
-                    _,embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
+                loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
+
+                #Metrics
 
 
-                    y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
-                    
-                    #Scaling and normalizing
-                    y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
+                #predicted = torch.max(y_predicted, 1) #indice del máximo  
+                vals, idx_pred = y_predicted.topk(20)  
+                vals, idx_truth = y_truth.topk(20)  
 
-                    y_predicted=y_predicted.to(device)
+                total_correct += (idx_pred == idx_truth).sum().item()
+            
+                total_samples_val += y_truth.size(0)*20
+                acc_validation = 100 * total_correct / total_samples_val
 
-                    
-                    y_truth = torch.tensor(a).to(device)
+            #Loss
+                running_vloss += loss_per_val_batch.item()
+                i_val+=1
 
-                    loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
-
-                    #Metrics
-                    # accurancy
-                    #total_samples_val += y_truth.size(0)
-
-                    #acc_val_ = 100 * total_correct / total_samples
-                    ## Loss
-                    running_vloss += loss_per_val_batch.item()
-
-                    i_val+=1
-            print("validation loss",running_vloss/i_val)
-            valid_loss_list.append(running_vloss/i_val)
- 
+            valid_loss_list.append(running_vloss/len(vdataloader))
+            acc_val.append(acc_validation)
     
-    return running_loss,loss_values,acc,valid_loss_list,acc_val
+    return loss_values,acc,valid_loss_list,acc_val
 
 
 
@@ -421,9 +432,9 @@ def main():
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
-    running_loss,loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
+    loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    PATH = 'trainedModelTM_abs_19March.pth'
+    PATH = 'trainedModelTM_abs_21March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
@@ -436,6 +447,11 @@ def main():
         np.savetxt('output/acc_Train_TM_21March.out', acc, delimiter=',')
     except:
         np.savetxt('output/acc_Train_TM_21March.out', [], delimiter=',')
+    
+    try:
+        np.savetxt('output/loss_Valid_TM_21March.out', valid_loss_list, delimiter=',')
+    except:
+        np.savetxt('output/loss_Valid_TM_21March.out', [], delimiter=',')
     
     try:
         np.savetxt('output/acc_val_21March.out', acc_val, delimiter=',')
