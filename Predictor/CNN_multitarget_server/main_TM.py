@@ -45,7 +45,7 @@ from torch import nn
 from transformers import CLIPTokenizer, CLIPTextModel
 
 torch.set_printoptions(profile="full")
-torch.manual_seed(999)
+torch.manual_seed(90)
 
 
 
@@ -82,14 +82,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 30
+    parser.epochs = 100
     parser.batch_size = 5
     parser.workers=0
-    parser.gpu_number=1
+    parser.gpu_number=2
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate = 1e-6
+    parser.learning_rate = 1e-5
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -136,8 +136,10 @@ def loadModel(device):
 
     """using weigth decay regularization"""
     opt = optimizer.Adam(fwd_test.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(reduction='sum')
+    #criterion=nn.MSELoss()
     fwd_test.train()
+
     return fwd_test, opt, criterion
 
 class CLIPTextEmbedder(nn.Module):
@@ -258,12 +260,12 @@ def train(opt,criterion,model, clipEmbedder,device):
         
         total_samples=0
         total_samples_val=0.0
-        last_loss = 0.
 
         print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
         print('-' * 10)
 
-        
+        model.train()
+
         for data in tqdm(dataloader):
             
             inputs, classes, names, classes_types = data
@@ -318,27 +320,28 @@ def train(opt,criterion,model, clipEmbedder,device):
                 
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(20)  
-                vals, idx_truth = y_truth.topk(20)  
+                vals, idx_pred = y_predicted.topk(5,dim=1)  
+                vals, idx_truth = y_truth.topk(5, dim=1)  
 
-                total_correct += (idx_pred == idx_truth).sum().item()
 
-                total_samples += y_truth.size(0)*20
-                acc_train = 100 * total_correct / total_samples
+                total_correct += (idx_pred == idx_truth ).sum().item()
+                total_samples += y_truth.size(0)*5
+                acc_train =  total_correct / total_samples
 
                 #Loss
                 loss_per_batch=errD_real.item()
-                running_loss +=loss_per_batch
-                epoch_loss+=loss_per_batch
+                running_loss +=loss_per_batch*y_truth.size(0)
+                epoch_loss+=loss_per_batch*y_truth.size(0)
+
                 i += 1
 
 
                 if i % 100 ==  99:    # print every 2000 mini-batches
-                    print(f'[{epoch + 1}, {i + 1:5d}] loss: {last_loss/len(dataloader) :.3f} running loss:  {running_loss/100:.3f}')
+                    print(f'[{epoch + 1}, {i :5d}] loss: {loss_per_batch/y_truth.size(0):.3f} running loss:  {running_loss/100:.3f}')
                     print(f'accuracy: {acc_train :.3f} ')
                     running_loss=0.0
 
-        loss_values.append(epoch_loss/len(dataloader) )
+        loss_values.append(epoch_loss/i )
         acc.append(acc_train)
             #print("train acc",acc)
             
@@ -392,19 +395,20 @@ def train(opt,criterion,model, clipEmbedder,device):
 
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(20)  
-                vals, idx_truth = y_truth.topk(20)  
+                vals, idx_pred = y_predicted.topk(5,dim=1)  
+                vals, idx_truth = y_truth.topk(5, dim=1)  
+
 
                 total_correct += (idx_pred == idx_truth).sum().item()
             
-                total_samples_val += y_truth.size(0)*20
-                acc_validation = 100 * total_correct / total_samples_val
+                total_samples_val += y_truth.size(0)*5
+                acc_validation = total_correct / total_samples_val
 
             #Loss
-                running_vloss += loss_per_val_batch.item()
+                running_vloss += loss_per_val_batch.item()*y_truth.size(0)
                 i_val+=1
 
-            valid_loss_list.append(running_vloss/len(vdataloader))
+            valid_loss_list.append(running_vloss/i_val)
             acc_val.append(acc_validation)
     
     return loss_values,acc,valid_loss_list,acc_val
@@ -434,29 +438,29 @@ def main():
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    PATH = 'trainedModelTM_abs_21March.pth'
+    PATH = 'trainedModelTM_abs_27March.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
-        np.savetxt('output/loss_Train_TM_21March.out', loss_values, delimiter=',')
+        np.savetxt('output/loss_Train_TM_27March.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('output/loss_Train_TM_21March.out', [], delimiter=',')
+        np.savetxt('output/loss_Train_TM_27March.out', [], delimiter=',')
 
     try:
-        np.savetxt('output/acc_Train_TM_21March.out', acc, delimiter=',')
+        np.savetxt('output/acc_Train_TM_27March.out', acc, delimiter=',')
     except:
-        np.savetxt('output/acc_Train_TM_21March.out', [], delimiter=',')
+        np.savetxt('output/acc_Train_TM_27March.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/loss_Valid_TM_21March.out', valid_loss_list, delimiter=',')
+        np.savetxt('output/loss_Valid_TM_27March.out', valid_loss_list, delimiter=',')
     except:
-        np.savetxt('output/loss_Valid_TM_21March.out', [], delimiter=',')
+        np.savetxt('output/loss_Valid_TM_27March.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/acc_val_21March.out', acc_val, delimiter=',')
+        np.savetxt('output/acc_val_27March.out', acc_val, delimiter=',')
     except:
-        np.savetxt('output/acc_val_21March.out', [], delimiter=',')
+        np.savetxt('output/acc_val_27March.out', [], delimiter=',')
 
 if __name__ == "__main__":
     main()
