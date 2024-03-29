@@ -136,7 +136,7 @@ def loadModel(device):
 
     """using weigth decay regularization"""
     opt = optimizer.Adam(fwd_test.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
-    criterion = nn.CrossEntropyLoss(reduction='sum')
+    criterion = nn.CrossEntropyLoss()
     #criterion=nn.MSELoss()
     fwd_test.train()
 
@@ -320,8 +320,8 @@ def train(opt,criterion,model, clipEmbedder,device):
                 
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(5,dim=1)  
-                vals, idx_truth = y_truth.topk(5, dim=1)  
+                vals, idx_pred = y_predicted.topk(100,dim=1)  
+                vals, idx_truth = y_truth.topk(100, dim=1)  
 
 
                 total_correct += (idx_pred == idx_truth ).sum().item()
@@ -382,22 +382,16 @@ def train(opt,criterion,model, clipEmbedder,device):
                 y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
                 
                 #Scaling and normalizing
-                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
 
                 y_predicted=y_predicted.to(device)
-
-                
                 y_truth = torch.tensor(a).to(device)
 
                 loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
-
-                #Metrics
 
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
                 vals, idx_pred = y_predicted.topk(5,dim=1)  
                 vals, idx_truth = y_truth.topk(5, dim=1)  
-
 
                 total_correct += (idx_pred == idx_truth).sum().item()
             
