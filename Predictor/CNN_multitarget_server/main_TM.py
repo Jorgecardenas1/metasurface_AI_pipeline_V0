@@ -89,7 +89,7 @@ def arguments():
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =5e-5
+    parser.learning_rate =5e-6
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 

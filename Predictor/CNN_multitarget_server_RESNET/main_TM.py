@@ -85,8 +85,8 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 2
-    parser.batch_size = 10
+    parser.epochs = 1
+    parser.batch_size = 9
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 512
@@ -144,15 +144,22 @@ def loadModel(device):
 
     return fwd_test, opt, criterion
 
-def get_net_resnet():
-    resnet = resnet50(pretrained=True)
+def get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction_size=601):
+    model = Stack.Predictor_CNN(cond_input_size=parser.condition_len, 
+                                ngpu=1, image_size=parser.image_size ,
+                                output_size=8, channels=3,
+                                features_num=features,hiden_num=hiden_num, #Its working with hiden nums. Features in case and extra linear layer
+                                dropout=dropout, 
+                                Y_prediction_size=Y_prediction_size) #size of the output vector in this case frenquency points
     
-    # Substitute the FC output layer
-    resnet.fc = torch.nn.Linear(resnet.fc.in_features, 3000)
-    torch.nn.init.xavier_uniform_(resnet.fc.weight) #Fill the input Tensor with values using a Xavier uniform distribution.
+    #torch.nn.init.xavier_uniform_(model.fc.weight) #Fill the input Tensor with values using a Xavier uniform distribution.
 
 
-    return resnet
+    opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
+    #criterion = nn.CrossEntropyLoss()
+    criterion=nn.MSELoss()
+    return model, opt, criterion 
+
 
 class CLIPTextEmbedder(nn.Module):
     """
@@ -454,14 +461,14 @@ def main():
 
     join_simulationData()  
 
-    fwd_test, opt, criterion=loadModel(device)
+    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction_size=601)
     fwd_test = fwd_test.to(device)
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    date="4Abr"
+    date="_RESNET_4Abr"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
