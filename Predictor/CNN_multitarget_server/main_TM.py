@@ -82,14 +82,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 100
-    parser.batch_size = 5
+    parser.epochs = 10
+    parser.batch_size = 10
     parser.workers=0
-    parser.gpu_number=2
+    parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate = 1e-5
+    parser.learning_rate =5e-5
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -128,17 +128,16 @@ def loadModel(device):
     fwd_test = Stack.Predictor_CNN(cond_input_size=parser.condition_len, 
                                 ngpu=1, image_size=parser.image_size ,
                                 output_size=8, channels=3,
-                                features_num=1000,hiden_num=3000, #Its working with hiden nums. Features in case and extra linear layer
-                                dropout=0.2, 
+                                features_num=3000,hiden_num=1000, #Its working with hiden nums. Features in case and extra linear layer
+                                dropout=0.1, 
                                 Y_prediction_size=601) #size of the output vector in this case frenquency points
     
     fwd_test.apply(weights_init)
 
     """using weigth decay regularization"""
     opt = optimizer.Adam(fwd_test.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
-    criterion = nn.CrossEntropyLoss()
-    #criterion=nn.MSELoss()
-    fwd_test.train()
+    #criterion = nn.CrossEntropyLoss()
+    criterion=nn.MSELoss()
 
     return fwd_test, opt, criterion
 
@@ -247,7 +246,9 @@ def train(opt,criterion,model, clipEmbedder,device):
     vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, validationImages,parser.batch_size, drop_last=True)
 
     for epoch in range(parser.epochs):
-        
+
+
+
         i=0 #iteration
         i_val=0 #running over validation set
 
@@ -298,51 +299,65 @@ def train(opt,criterion,model, clipEmbedder,device):
             
             _, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
             
-            embedded=embedded.to(device)
+            conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
+
             #conditioningArray=torch.FloatTensor(array)
             
             if embedded.shape[2]==parser.condition_len:
             
-                y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
-            
+                y_predicted=model(input_=inputs, conditioning=conditioningTensor.to(device) ,b_size=inputs.shape[0])
+                
+                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
                 y_predicted=y_predicted.to(device)
                 
                 y_truth = torch.tensor(a).to(device)
                 
                 errD_real = criterion(y_predicted.float(), y_truth.float())  
-
+                
                 errD_real.backward()
-
+                loss_per_batch=errD_real.item()
                 opt.step()
     
                 # Metrics
                 # Accuracy
                 
-
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(100,dim=1)  
-                vals, idx_truth = y_truth.topk(100, dim=1)  
+                vals, idx_pred = y_predicted.topk(10,dim=1)  
+                vals, idx_truth = y_truth.topk(10, dim=1)  
+                
+                total_truths=0
 
+                for idx,val in enumerate(idx_pred):
+                    for item in val:
+                        if item in idx_truth[idx]:
+                            total_truths+=1
 
-                total_correct += (idx_pred == idx_truth ).sum().item()
-                total_samples += y_truth.size(0)*5
-                acc_train =  total_correct / total_samples
+                #print(total_truths)    
+                total_samples=idx_truth.size(0)*10
+
+                acc_train+=total_truths/total_samples
+                #print(acc_train)
+
+                #total_correct += (idx_pred == idx_truth ).sum().item()
+                #total_samples += y_truth.size(0)*10
+                #acc_train =  total_correct / total_samples
+                
+                #acc_train+= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean().item()
 
                 #Loss
-                loss_per_batch=errD_real.item()
                 running_loss +=loss_per_batch*y_truth.size(0)
                 epoch_loss+=loss_per_batch*y_truth.size(0)
 
                 i += 1
 
-
                 if i % 100 ==  99:    # print every 2000 mini-batches
                     print(f'[{epoch + 1}, {i :5d}] loss: {loss_per_batch/y_truth.size(0):.3f} running loss:  {running_loss/100:.3f}')
-                    print(f'accuracy: {acc_train :.3f} ')
+                    print(f'accuracy: {acc_train/i :.3f} ')
                     running_loss=0.0
 
         loss_values.append(epoch_loss/i )
-        acc.append(acc_train)
+        print("mean Acc per epoch",acc_train/len(dataloader))
+        acc.append(acc_train/len(dataloader))
             #print("train acc",acc)
             
 
@@ -380,7 +395,8 @@ def train(opt,criterion,model, clipEmbedder,device):
 
 
                 y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
-                
+                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
+
                 #Scaling and normalizing
 
                 y_predicted=y_predicted.to(device)
@@ -390,12 +406,12 @@ def train(opt,criterion,model, clipEmbedder,device):
 
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(5,dim=1)  
-                vals, idx_truth = y_truth.topk(5, dim=1)  
+                vals, idx_pred = y_predicted.topk(10,dim=1)  
+                vals, idx_truth = y_truth.topk(10, dim=1) 
 
                 total_correct += (idx_pred == idx_truth).sum().item()
             
-                total_samples_val += y_truth.size(0)*5
+                total_samples_val += y_truth.size(0)*10
                 acc_validation = total_correct / total_samples_val
 
             #Loss
@@ -432,29 +448,30 @@ def main():
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    PATH = 'trainedModelTM_abs_27March.pth'
+    date="4Abr"
+    PATH = 'trainedModelTM_abs_'+date+'.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
-        np.savetxt('output/loss_Train_TM_27March.out', loss_values, delimiter=',')
+        np.savetxt('output/loss_Train_TM_'+date+'.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('output/loss_Train_TM_27March.out', [], delimiter=',')
+        np.savetxt('output/loss_Train_TM_'+date+'.out', [], delimiter=',')
 
     try:
-        np.savetxt('output/acc_Train_TM_27March.out', acc, delimiter=',')
+        np.savetxt('output/acc_Train_TM_'+date+'.out', acc, delimiter=',')
     except:
-        np.savetxt('output/acc_Train_TM_27March.out', [], delimiter=',')
+        np.savetxt('output/acc_Train_TM_'+date+'.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/loss_Valid_TM_27March.out', valid_loss_list, delimiter=',')
+        np.savetxt('output/loss_Valid_TM_'+date+'.out', valid_loss_list, delimiter=',')
     except:
-        np.savetxt('output/loss_Valid_TM_27March.out', [], delimiter=',')
+        np.savetxt('output/loss_Valid_TM_'+date+'.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/acc_val_27March.out', acc_val, delimiter=',')
+        np.savetxt('output/acc_val_'+date+'.out', acc_val, delimiter=',')
     except:
-        np.savetxt('output/acc_val_27March.out', [], delimiter=',')
+        np.savetxt('output/acc_val_'+date+'.out', [], delimiter=',')
 
 if __name__ == "__main__":
     main()

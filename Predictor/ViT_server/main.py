@@ -39,6 +39,7 @@ import json
 
 import argparse
 
+torch.manual_seed(90)
 
 # Path to the folder where the datasets are/should be downloaded (e.g. CIFAR10)
 DATASET_PATH = os.environ.get("PATH_DATASETS", "data/")
@@ -147,7 +148,7 @@ def train(model):
 
     for epoch in range(parser.epochs):
         dataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, boxImagesPath,parser.batch_size, drop_last=True)
-        vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, validationImages,10, drop_last=True)
+        vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, validationImages,parser.batch_size, drop_last=True)
 
         i=0 #iteration
         i_val=0 #running over validation set
@@ -180,6 +181,7 @@ def train(model):
             classes = classes.to(device)
             #else:
             #    images, classes, names, classes_types = data
+            opt.zero_grad()
 
             a = [] #array with truth values
             
@@ -196,7 +198,6 @@ def train(model):
             
             a=np.array(a)     
 
-
             #Aun sin CLIP
             conditioningArray=torch.FloatTensor(set_conditioning(classes, names, classes_types))
             conditioningArray=conditioningArray.to(device)
@@ -204,9 +205,6 @@ def train(model):
             #Train
             #if conditioningArray.shape[1]==parser.condition_len:
                 
-                
-            opt.zero_grad()
-
             #for conditioning in case required
             #outmap_min, _ = torch.min(conditioningArray, dim=1, keepdim=True)
             #outmap_max, _ = torch.max(conditioningArray, dim=1, keepdim=True)
@@ -217,42 +215,52 @@ def train(model):
 
             y_predicted = model(images,condition=conditioningArray)
             y_predicted=y_predicted.to(device)
-            #y_predicted= F.softmax (y_predicted,dim=-1)
             
             y_truth = torch.tensor(a).to(device)
 
-            errD_real = criterion(y_predicted.float(), y_truth.float())                
+            errD_real = criterion(y_predicted.float(), y_truth.float())     
+
             errD_real.backward()
+            loss_per_batch=errD_real.item()
+
             opt.step()
 
             #Metrics
             #acc_train= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean()
 
             #predicted = torch.max(y_predicted, 1) #indice del máximo  
-            vals, idx_pred = y_predicted.topk(5,dim=1)  
-            vals, idx_truth = y_truth.topk(5, dim=1)  
+            #predicted = torch.max(y_predicted, 1) #indice del máximo  
+            vals, idx_pred = y_predicted.topk(10,dim=1)  
+            vals, idx_truth = y_truth.topk(10, dim=1)  
+            
+            total_truths=0
+
+            for idx,val in enumerate(idx_pred):
+                for item in val:
+                    if item in idx_truth[idx]:
+                        total_truths+=1
+
+            #print(total_truths)    
+            total_samples=idx_truth.size(0)*10
+
+            acc_train+=total_truths/total_samples  
 
 
-            total_correct += (idx_pred == idx_truth ).sum().item()
-            total_samples += y_truth.size(0)*5
-            acc_train =  total_correct / total_samples
 
-            #Loss
-            loss_per_batch=errD_real.item()
             running_loss +=loss_per_batch*y_truth.size(0)
             epoch_loss+=loss_per_batch*y_truth.size(0)
 
             i += 1
 
-
             if i % 100 ==  99:    # print every 2000 mini-batches
                 print(f'[{epoch + 1}, {i :5d}] loss: {loss_per_batch/y_truth.size(0):.3f} running loss:  {running_loss/100:.3f}')
-                print(f'accuracy: {acc_train :.3f} ')
+                print(f'accuracy: {acc_train/i :.3f} ')
                 running_loss=0.0
 
 
         loss_values.append(epoch_loss/i )
-        acc.append(acc_train)
+        print("mean Acc per epoch",acc_train/len(dataloader))
+        acc.append(acc_train/len(dataloader))
         
 
         """validation"""
@@ -290,24 +298,25 @@ def train(model):
 
 
                 y_predicted = model(images,condition=conditioningArray)
+                y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
                 y_predicted=y_predicted.to(device)
-                
+
                 y_truth = torch.tensor(a).to(device)
 
-                errD_pred = criterion(y_predicted.float(), y_truth.float())  
+                loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
+
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
                 vals, idx_pred = y_predicted.topk(5,dim=1)  
                 vals, idx_truth = y_truth.topk(5, dim=1)  
 
-
                 total_correct += (idx_pred == idx_truth).sum().item()
             
                 total_samples_val += y_truth.size(0)*5
                 acc_validation = total_correct / total_samples_val
-                
+
             #Loss
-                running_vloss += errD_pred.item()*y_truth.size(0)
+                running_vloss += loss_per_val_batch.item()*y_truth.size(0)
                 i_val+=1
 
             valid_loss_list.append(running_vloss/i_val)
@@ -387,30 +396,31 @@ def main():
 
     loss_values,acc,valid_loss_list,acc_val=train(vision_transformer)
 
-    PATH = 'trainedModelTM_abs_27March.pth'
-
+    date="2Abr"
+    PATH = 'VITtrainedModelTM_abs_'+date+'.pth'
     torch.save(vision_transformer.state_dict(), PATH)
 
     try:
-        np.savetxt('output/loss_Train_TM_27March.out', loss_values, delimiter=',')
+        np.savetxt('output/VITloss_Train_TM_'+date+'.out', loss_values, delimiter=',')
         
     except:
-        np.savetxt('output/loss_Train_TM_27March.out', [], delimiter=',')
+        np.savetxt('output/VITloss_Train_TM_'+date+'.out', [], delimiter=',')
 
     try:
-        np.savetxt('output/acc_Train_TM_27March.out', acc, delimiter=',')
+        np.savetxt('output/VITacc_Train_TM_'+date+'.out', acc, delimiter=',')
     except:
-        np.savetxt('output/acc_Train_TM_27March.out', [], delimiter=',')
+        np.savetxt('output/VITacc_Train_TM_'+date+'.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/loss_Valid_TM_27March.out', valid_loss_list, delimiter=',')
+        np.savetxt('output/VITloss_Valid_TM_'+date+'.out', valid_loss_list, delimiter=',')
     except:
-        np.savetxt('output/loss_Valid_TM_27March.out', [], delimiter=',')
+        np.savetxt('output/VITloss_Valid_TM_'+date+'.out', [], delimiter=',')
     
     try:
-        np.savetxt('output/acc_val_27March.out', acc_val, delimiter=',')
+        np.savetxt('output/VITacc_val_'+date+'.out', acc_val, delimiter=',')
     except:
-        np.savetxt('output/acc_val_27March.out', [], delimiter=',')
+        np.savetxt('output/VITacc_val_'+date+'.out', [], delimiter=',')
+
 
         
 if __name__ == "__main__":
