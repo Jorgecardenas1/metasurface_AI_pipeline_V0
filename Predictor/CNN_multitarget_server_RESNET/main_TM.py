@@ -47,6 +47,9 @@ from transformers import CLIPTokenizer, CLIPTextModel
 torch.set_printoptions(profile="full")
 torch.manual_seed(90)
 
+#RESNET
+from torchvision.models import resnet50, ResNet50_Weights
+
 
 
 
@@ -140,6 +143,16 @@ def loadModel(device):
     criterion=nn.MSELoss()
 
     return fwd_test, opt, criterion
+
+def get_net_resnet():
+    resnet = resnet50(pretrained=True)
+    
+    # Substitute the FC output layer
+    resnet.fc = torch.nn.Linear(resnet.fc.in_features, 3000)
+    torch.nn.init.xavier_uniform_(resnet.fc.weight) #Fill the input Tensor with values using a Xavier uniform distribution.
+
+
+    return resnet
 
 class CLIPTextEmbedder(nn.Module):
     """
