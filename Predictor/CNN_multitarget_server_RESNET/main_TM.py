@@ -85,14 +85,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 1
-    parser.batch_size = 9
+    parser.epochs = 50
+    parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =5e-5
+    parser.learning_rate =1e-4
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -468,7 +468,7 @@ def main():
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    date="_RESNET_4Abr"
+    date="_RESNET_4Abr_1e-4"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
