@@ -85,14 +85,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 100
+    parser.epochs = 10
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =1e-6
+    parser.learning_rate =5e-6
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -156,8 +156,8 @@ def get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction
 
 
     opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
-    #criterion = nn.CrossEntropyLoss()
-    criterion=nn.MSELoss()
+    criterion = nn.CrossEntropyLoss()
+    #criterion=nn.MSELoss()
     return model, opt, criterion 
 
 
@@ -461,20 +461,20 @@ def main():
 
     join_simulationData()  
 
-    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=1500,dropout=0.1,features=3500, Y_prediction_size=601)
+    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=800,dropout=0.2,features=1500, Y_prediction_size=601)
     fwd_test = fwd_test.to(device)
+    print(fwd_test)
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    date="_RESNET_4Abr_1e-6_100epc_512"
+    date="_RESNET_5Abr_5e-6_500epc_512_crossent"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
         np.savetxt('output/loss_Train_TM_'+date+'.out', loss_values, delimiter=',')
-        
     except:
         np.savetxt('output/loss_Train_TM_'+date+'.out', [], delimiter=',')
 
