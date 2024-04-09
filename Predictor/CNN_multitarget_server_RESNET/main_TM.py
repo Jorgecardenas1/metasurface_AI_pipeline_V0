@@ -85,7 +85,7 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 10
+    parser.epochs = 512
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
