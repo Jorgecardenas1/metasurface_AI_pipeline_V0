@@ -62,7 +62,7 @@ parser = argparse.ArgumentParser()
 boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
 DataPath="../../../data/MetasufacesData/Exports/output/"
 simulationData="../../../data/MetasufacesData/DBfiles/"
-validationImages="../../../data/MetasufacesData/testImages/"
+validationImages="../../../data/MetasufacesData/testImagesfullband/"
 
 
 Substrates={"Rogers RT/duroid 5880 (tm)":0}
@@ -85,14 +85,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 512
+    parser.epochs = 50
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =5e-6
+    parser.learning_rate =1e-5
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -326,7 +326,6 @@ def train(opt,criterion,model, clipEmbedder,device):
             if embedded.shape[2]==parser.condition_len:
             
                 y_predicted=model(input_=inputs, conditioning=conditioningTensor.to(device) ,b_size=inputs.shape[0])
-                
                 y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
                 y_predicted=y_predicted.to(device)
                 
@@ -421,7 +420,7 @@ def train(opt,criterion,model, clipEmbedder,device):
 
                 y_predicted=y_predicted.to(device)
                 y_truth = torch.tensor(a).to(device)
-
+               
                 loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
 
 
@@ -461,7 +460,7 @@ def main():
 
     join_simulationData()  
 
-    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=800,dropout=0.2,features=1500, Y_prediction_size=601)
+    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=500,dropout=0.2,features=1500, Y_prediction_size=601)
     fwd_test = fwd_test.to(device)
     print(fwd_test)
 
@@ -469,7 +468,7 @@ def main():
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    date="_RESNET_5Abr_5e-6_500epc_512_crossent"
+    date="_RESNET_13Abr_1e-5_50epc_512_CEnt"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
     torch.save(fwd_test.state_dict(), PATH)
 

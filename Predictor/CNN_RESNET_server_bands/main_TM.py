@@ -86,7 +86,7 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 100
+    parser.epochs = 50
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
@@ -98,8 +98,6 @@ def arguments():
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
     categories=["box", "circle", "cross"]
-
-
 
 
 # Images loading
@@ -157,8 +155,8 @@ def get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction
 
 
     opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
-    #criterion = nn.CrossEntropyLoss()
-    criterion=nn.MSELoss()
+    criterion = nn.CrossEntropyLoss()
+    #criterion=nn.MSELoss()
     return model, opt, criterion 
 
 
@@ -246,7 +244,7 @@ def set_conditioning(bands_batch,target,path,categories,clipEmbedder,df,device):
 
 
 
-def train(opt,criterion,model, clipEmbedder,device):
+def train(opt,criterion,model, clipEmbedder,device, PATH):
     #### #File reading conf
 
     a = []
@@ -414,7 +412,10 @@ def train(opt,criterion,model, clipEmbedder,device):
 
         # Set the model to evaluation mode, disabling dropout and using population
         # statistics for batch normalization.
+        torch.save(model.state_dict(), PATH)
+
         model.eval()
+
 
         with torch.no_grad():
             for vdata in tqdm(vdataloader):
@@ -525,16 +526,19 @@ def main():
 
     join_simulationData()  
 
-    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=800,dropout=0.2,features=1500, Y_prediction_size=100)
+    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=3000, Y_prediction_size=100)
     fwd_test = fwd_test.to(device)
     print(fwd_test)
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
-    loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    date="_RESNET_Bands_8Abr_5e-6_100epc_512_Cent"
+    date="_RESNET_Bands_13Abr_5e-6_50epc_512_Cent"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
+
+    loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device,PATH )
+
+
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
