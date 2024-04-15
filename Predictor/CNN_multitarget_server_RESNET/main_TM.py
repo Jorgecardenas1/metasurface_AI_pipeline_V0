@@ -85,7 +85,7 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 50
+    parser.epochs = 150
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
@@ -249,7 +249,7 @@ def set_conditioning(target,path,categories,clipEmbedder,df,device):
 
 
 
-def train(opt,criterion,model, clipEmbedder,device):
+def train(opt,criterion,model, clipEmbedder,device, PATH):
     #### #File reading conf
 
     a = []
@@ -384,6 +384,8 @@ def train(opt,criterion,model, clipEmbedder,device):
 
         # Set the model to evaluation mode, disabling dropout and using population
         # statistics for batch normalization.
+        torch.save(model.state_dict(), PATH)
+
         model.eval()
 
         with torch.no_grad():
@@ -466,10 +468,12 @@ def main():
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
-    loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device)
 
-    date="_RESNET_13Abr_1e-5_50epc_512_CEnt"
+    date="_RESNET_14Abr_1e-5_150epc_512_CEnt"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
+
+    loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device, PATH)
+
     torch.save(fwd_test.state_dict(), PATH)
 
     try:
