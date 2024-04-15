@@ -92,7 +92,7 @@ def arguments():
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =1e-5
+    parser.learning_rate =2e-5
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -462,14 +462,14 @@ def main():
 
     join_simulationData()  
 
-    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=500,dropout=0.2,features=1500, Y_prediction_size=601)
+    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=800,dropout=0.2,features=1000, Y_prediction_size=601)
     fwd_test = fwd_test.to(device)
     print(fwd_test)
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
 
-    date="_RESNET_14Abr_1e-5_150epc_512_CEnt"
+    date="_RESNET_15Abr_2e-5_150epc_h800_f1000_512_CEnt"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device, PATH)

@@ -86,14 +86,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 50
+    parser.epochs = 150
     parser.batch_size = 10
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 512
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =5e-6
+    parser.learning_rate =3e-5
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -526,14 +526,14 @@ def main():
 
     join_simulationData()  
 
-    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=3000, Y_prediction_size=100)
+    fwd_test, opt, criterion=get_net_resnet(device,hiden_num=500,dropout=0.2,features=1000, Y_prediction_size=100)
     fwd_test = fwd_test.to(device)
     print(fwd_test)
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
 
-    date="_RESNET_Bands_13Abr_5e-6_50epc_512_Cent"
+    date="_RESNET_Bands_15Abr_3e-5_150epc_h500_f1000_512_Cent"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,criterion,fwd_test,ClipEmbedder,device,PATH )
