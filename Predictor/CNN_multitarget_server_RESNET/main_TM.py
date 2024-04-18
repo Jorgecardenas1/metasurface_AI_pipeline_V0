@@ -339,8 +339,8 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
                 # Accuracy
                 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(100,dim=1)  
-                vals, idx_truth = y_truth.topk(100, dim=1)  
+                vals, idx_pred = y_predicted.topk(10,dim=1)  
+                vals, idx_truth = y_truth.topk(10, dim=1)  
                 
                 total_truths=0
 
@@ -350,7 +350,7 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
                             total_truths+=1
 
                 #print(total_truths)    
-                total_samples=idx_truth.size(0)*100
+                total_samples=idx_truth.size(0)*10
 
                 acc_train+=total_truths/total_samples
                 #print(acc_train)
@@ -362,8 +362,8 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
                 #acc_train+= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean().item()
 
                 #Loss
-                running_loss +=loss_per_batch*y_truth.size(0)
-                epoch_loss+=loss_per_batch*y_truth.size(0)
+                running_loss +=loss_per_batch
+                epoch_loss+=loss_per_batch
 
                 i += 1
 
@@ -377,7 +377,6 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
         print("mean Acc per epoch",acc_train/len(dataloader))
         acc.append(acc_train/len(dataloader))
             #print("train acc",acc)
-            
 
         """validation"""
 
@@ -426,16 +425,16 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
 
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(100,dim=1)  
-                vals, idx_truth = y_truth.topk(100, dim=1) 
+                vals, idx_pred = y_predicted.topk(10,dim=1)  
+                vals, idx_truth = y_truth.topk(10, dim=1) 
 
                 total_correct += (idx_pred == idx_truth).sum().item()
             
-                total_samples_val += y_truth.size(0)*100
+                total_samples_val += y_truth.size(0)*10
                 acc_validation = total_correct / total_samples_val
 
             #Loss
-                running_vloss += loss_per_val_batch.item()*y_truth.size(0)
+                running_vloss += loss_per_val_batch.item()
                 i_val+=1
 
             valid_loss_list.append(running_vloss/i_val)
