@@ -60,11 +60,15 @@ parser = argparse.ArgumentParser()
 # DataPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Exports\\output\\"
 # simulationData="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\DBfiles\\"
 
-boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
-DataPath="../../../data/MetasufacesData/Exports/output/"
-simulationData="../../../data/MetasufacesData/DBfiles/"
-validationImages="../../../data/MetasufacesData/testImagesfullband/"
+#boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
+#DataPath="../../../data/MetasufacesData/Exports/output/"
+#simulationData="../../../data/MetasufacesData/DBfiles/"
+#validationImages="../../../data/MetasufacesData/testImagesfullband/"
 
+boxImagesPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Images Jorge Cardenas 512\\"
+validationImages="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\testImagesfullband\\"
+DataPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Exports\\output\\"
+simulationData="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\DBfiles\\"
 
 Substrates={"Rogers RT/duroid 5880 (tm)":0}
 Materials={"copper":0,"pec":1}
@@ -247,7 +251,9 @@ def set_conditioning(target,path,categories,clipEmbedder,df,device):
     
         datos=" ".join([str(element) for element in  [geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,1,1,1,1,1]])
         embedding=clipEmbedder(prompts=(datos))
-        
+
+
+
     return arr, embedding
 
 
@@ -311,7 +317,7 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
 
                     train = pd.read_csv(name)
                     values=np.array(train.values.T)
-                    a.append(values[1])
+                    a.append(values[1][-10:])
                     
                     
             a=np.array(a)     
@@ -319,13 +325,14 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
             """Creating a conditioning vector"""
             
             _, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
-            conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
+            #conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
 
             #conditioningArray=torch.FloatTensor(array)
             
             if embedded.shape[2]==parser.condition_len:
             
-                y_predicted=model(input_=inputs, conditioning=conditioningTensor.to(device) ,b_size=inputs.shape[0])
+                y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
+                print(y_predicted)
                 #y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
                 #y_predicted=y_predicted.to(device)
                 y_truth = torch.tensor(a).to(device)
@@ -406,7 +413,7 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
                         #loading the absorption data
                         train = pd.read_csv(name)
                         values=np.array(train.values.T)
-                        a.append(values[1])
+                        a.append(values[1][-10:])
                 
                 a=np.array(a)  
                 #Aun sin CLIP
@@ -460,7 +467,7 @@ def main():
 
     # Modelling
 
-    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=800,dropout=0.2,features=1500, Y_prediction_size=601)
+    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=800,dropout=0.2,features=1500, Y_prediction_size=10)
     fwd_test = fwd_test.to(device)
     print(fwd_test)
 
