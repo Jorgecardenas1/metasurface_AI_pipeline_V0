@@ -36,8 +36,6 @@ import argparse
 
 import json
 
-
-
 # Clip 
 from typing import List
 
@@ -45,7 +43,6 @@ from torch import nn
 from transformers import CLIPTokenizer, CLIPTextModel
 
 torch.set_printoptions(profile="full")
-torch.manual_seed(999)
 
 #RESNET
 from torchvision.models import resnet50, ResNet50_Weights
@@ -53,22 +50,21 @@ from torchvision.models import resnet50, ResNet50_Weights
 
 
 torch.set_printoptions(profile="full")
-torch.manual_seed(999)
 # Arguments
 parser = argparse.ArgumentParser()
 # boxImagesPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Images Jorge Cardenas 512\\"
 # DataPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Exports\\output\\"
 # simulationData="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\DBfiles\\"
 
-#boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
-#DataPath="../../../data/MetasufacesData/Exports/output/"
-#simulationData="../../../data/MetasufacesData/DBfiles/"
-#validationImages="../../../data/MetasufacesData/testImagesfullband/"
+boxImagesPath="../../../data/MetasufacesData/Images Jorge Cardenas 512/"
+DataPath="../../../data/MetasufacesData/Exports/output/"
+simulationData="../../../data/MetasufacesData/DBfiles/"
+validationImages="../../../data/MetasufacesData/testImagesfullband/"
 
-boxImagesPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Images Jorge Cardenas 512\\"
-validationImages="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\testImagesfullband\\"
-DataPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Exports\\output\\"
-simulationData="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\DBfiles\\"
+#boxImagesPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Images Jorge Cardenas 512\\"
+#validationImages="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\testImagesfullband\\"
+#DataPath="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\Exports\\output\\"
+#simulationData="C:\\Users\\jorge\\Dropbox\\Public\\MetasufacesData\\DBfiles\\"
 
 Substrates={"Rogers RT/duroid 5880 (tm)":0}
 Materials={"copper":0,"pec":1}
@@ -90,14 +86,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 150
-    parser.batch_size = 10
+    parser.epochs = 10
+    parser.batch_size = 5
     parser.workers=0
     parser.gpu_number=1
-    parser.image_size = 512
+    parser.image_size = 128
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =2e-5
+    parser.learning_rate =2e-3
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -271,8 +267,8 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
 
     df = pd.read_csv("out.csv")
     
-    dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,0.98, boxImagesPath,parser.batch_size,drop_last=True)
-    vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,0.98, validationImages,parser.batch_size, drop_last=True)
+    dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,0.99, boxImagesPath,parser.batch_size,drop_last=True)
+    vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,0.99, validationImages,parser.batch_size, drop_last=True)
 
     for epoch in range(parser.epochs):
 
@@ -317,7 +313,7 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
 
                     train = pd.read_csv(name)
                     values=np.array(train.values.T)
-                    a.append(values[1][-10:])
+                    a.append(values[1][-100:])
                     
                     
             a=np.array(a)     
@@ -325,29 +321,27 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
             """Creating a conditioning vector"""
             
             _, embedded=set_conditioning(classes, names, classes_types,clipEmbedder,df,device)
-            #conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
 
-            #conditioningArray=torch.FloatTensor(array)
-            
             if embedded.shape[2]==parser.condition_len:
             
                 y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
-                print(y_predicted)
-                #y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
-                #y_predicted=y_predicted.to(device)
+
                 y_truth = torch.tensor(a).to(device)
+                y_truth,_=y_truth.topk(2,dim=1) 
+
                 
+
                 errD_real = criterion(y_predicted.float(), y_truth.float())  
-                errD_real.backward()
                 loss_per_batch=errD_real.item()
+                errD_real.backward()
                 opt.step()
     
                 # Metrics
                 # Accuracy
                 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(10,dim=1)  
-                vals, idx_truth = y_truth.topk(10, dim=1)  
+                vals, idx_pred = y_predicted.topk(2,dim=1)  
+                vals, idx_truth = y_truth.topk(2, dim=1)  
                 
                 total_truths=0
 
@@ -357,17 +351,9 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
                             total_truths+=1
 
                 #print(total_truths)    
-                total_samples=idx_truth.size(0)*10
+                total_samples=idx_truth.size(0)*2
 
                 acc_train+=total_truths/total_samples
-                #print(acc_train)
-
-                #total_correct += (idx_pred == idx_truth ).sum().item()
-                #total_samples += y_truth.size(0)*10
-                #acc_train =  total_correct / total_samples
-                
-                #acc_train+= (y_predicted.argmax(dim=-1) == y_truth.argmax(dim=-1)).float().mean().item()
-
                 #Loss
                 running_loss +=loss_per_batch
                 epoch_loss+=loss_per_batch
@@ -375,6 +361,8 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
                 i += 1
 
                 if i % 100 ==  99:    # print every 2000 mini-batches
+                    print(y_truth)
+                    print(y_predicted)
                     print(f'[{epoch + 1}, {i :5d}] loss: {loss_per_batch/y_truth.size(0):.3f} running loss:  {running_loss/100:.3f}')
                     print(f'accuracy: {acc_train/i :.3f} ')
                     running_loss=0.0
@@ -413,7 +401,7 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
                         #loading the absorption data
                         train = pd.read_csv(name)
                         values=np.array(train.values.T)
-                        a.append(values[1][-10:])
+                        a.append(values[1][-100:])
                 
                 a=np.array(a)  
                 #Aun sin CLIP
@@ -427,17 +415,19 @@ def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
 
                 y_predicted=y_predicted.to(device)
                 y_truth = torch.tensor(a).to(device)
-               
+                y_truth,_=y_truth.topk(2,dim=1) 
+
+   
                 loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
 
 
                 #predicted = torch.max(y_predicted, 1) #indice del máximo  
-                vals, idx_pred = y_predicted.topk(10,dim=1)  
-                vals, idx_truth = y_truth.topk(10, dim=1) 
+                vals, idx_pred = y_predicted.topk(2,dim=1)  
+                vals, idx_truth = y_truth.topk(2, dim=1) 
 
                 total_correct += (idx_pred == idx_truth).sum().item()
             
-                total_samples_val += y_truth.size(0)*10
+                total_samples_val += y_truth.size(0)*2
                 acc_validation = total_correct / total_samples_val
 
             #Loss
@@ -467,13 +457,13 @@ def main():
 
     # Modelling
 
-    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=800,dropout=0.2,features=1500, Y_prediction_size=10)
+    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=1000, Y_prediction_size=2)
     fwd_test = fwd_test.to(device)
     print(fwd_test)
 
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
-    date="_RESNET_18Abr_2e-5_150epc_h800_f1500_512_CE_Norm"
+    date="_RESNET_18Abr_2e-5_3epc_h1000_f1000_128_MSE_out2"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
 
     loss_values,acc,valid_loss_list,acc_val=train(opt,scheduler,criterion,fwd_test,ClipEmbedder,device, PATH)
