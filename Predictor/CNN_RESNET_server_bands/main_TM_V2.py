@@ -23,33 +23,27 @@ import torch.optim as optimizer
 from torchsummary import summary
 from torch.utils.data import TensorDataset
 from torch.utils.data import DataLoader
-
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-
 from IPython.display import HTML
-from ignite.contrib.metrics.regression.r2_score import R2Score
-
 import glob
 from tqdm.notebook import tqdm
-
 import argparse
-
 import json
-
 
 
 # Clip 
 from typing import List
 
 from torch import nn
-from transformers import CLIPTokenizer, CLIPTextModel
+from transformers import CLIPTokenizer, CLIPTextModel,CLIPTextConfig
 
 #torch.set_printoptions(profile="full")
 #torch.manual_seed(999)
 
 #RESNET
 from torchvision.models import resnet50, ResNet50_Weights
+from torcheval.metrics.functional import r2_score
 
 
 # Arguments
@@ -85,14 +79,14 @@ def arguments():
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 10
-    parser.batch_size = 10
-    parser.workers=0
+    parser.epochs = 50
+    parser.batch_size = 100
+    parser.workers=1
     parser.gpu_number=1
     parser.image_size = 128
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
-    parser.learning_rate =2e-3
+    parser.learning_rate =2e-4
     parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
@@ -113,6 +107,7 @@ def join_simulationData():
 
 def get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction_size=601):
     model = Stack.Predictor_RESNET(cond_input_size=parser.condition_len, 
+                                   cond_channels=1, 
                                 ngpu=1, image_size=parser.image_size ,
                                 output_size=8, channels=3,
                                 features_num=features,hiden_num=hiden_num, #Its working with hiden nums. Features in case and extra linear layer
@@ -122,14 +117,13 @@ def get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction
     #torch.nn.init.xavier_uniform_(model.fc.weight) #Fill the input Tensor with values using a Xavier uniform distribution.
 
 
-    opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-5)
+    opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.5, 0.999),weight_decay=1e-4)
     #criterion = nn.CrossEntropyLoss()
     #criterion = nn.L1Loss()
     criterion=nn.MSELoss()
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
-    score_metric=R2Score()
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.8)
 
-    return model, opt, criterion ,score_metric, scheduler
+    return model, opt, criterion , scheduler
 
 
 
@@ -149,6 +143,7 @@ class CLIPTextEmbedder(nn.Module):
         self.tokenizer = CLIPTokenizer.from_pretrained(version,device_map = device)
         # Load the CLIP transformer
         self.transformer = CLIPTextModel.from_pretrained(version,device_map = device).eval()
+
         self.device = device
         self.max_length = max_length
 
@@ -157,7 +152,7 @@ class CLIPTextEmbedder(nn.Module):
         :param prompts: are the list of prompts to embed
         """
         # Tokenize the prompts
-        batch_encoding = self.tokenizer(prompts, truncation=True, max_length=self.max_length, return_length=True,
+        batch_encoding = self.tokenizer(prompts, truncation=False, max_length=self.max_length, return_length=True,
                                         return_overflowing_tokens=False, padding="max_length", return_tensors="pt").to(self.device)
         # Get token ids
         tokens = batch_encoding["input_ids"]
@@ -165,11 +160,12 @@ class CLIPTextEmbedder(nn.Module):
         return self.transformer(input_ids=tokens).last_hidden_state
 
 
+
 # Conditioning
 def set_conditioning(bands_batch,target,path,categories,clipEmbedder,df,device):
     
     arr=[]
-
+    values_array=[]
     for idx,name in enumerate(path):
         #print(name)
         series=name.split('_')[-2]
@@ -205,22 +201,25 @@ def set_conditioning(bands_batch,target,path,categories,clipEmbedder,df,device):
             sustratoHeight= json.loads(row["paramValues"].values[0])
             sustratoHeight= sustratoHeight[-1]
         
-        arr.append([geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band,1,1,1,1])
+        datos = ""
+        datos=", ".join([str(element) for element in  [geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band]])
+        values_array.append(datos)
+        embedding=clipEmbedder(prompts=datos)
 
-        datos=" ".join([str(element) for element in  [geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band,1,1,1,1]])
-        embedding=clipEmbedder(prompts=(datos))
-    return arr, embedding
+        embedding=embedding[:,0:30:,:]
+        arr.append(embedding)
+
+    embedding = torch.stack(arr)
+
+    return values_array, embedding
 
 
-def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,score_metric,clipEmbedder,df):
+def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedder,df):
     i=0 #iteration
     running_loss = 0. 
     epoch_loss = 0.
     acc_train=0.0
-    total_samples=0
     bands_batch=[]
-
-
 
     print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
     print('-' * 10)
@@ -247,47 +246,45 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,score_metr
             batch=name.split('_')[4]
 
             for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
-                
                 #loading the absorption data
                 train = pd.read_csv(name)
-                
+
                 # the band is divided in chunks 
                 if Bands[str(band_name)]==0:
 
-                    #train=train.loc[1:100]
-                    train=train.max()
+                    train=train.loc[1:100]
 
                 elif Bands[str(band_name)]==1:
 
                     train=train.loc[101:200]
-                    train=train.max()
+
                 elif Bands[str(band_name)]==2:
 
                     train=train.loc[201:300]
-                    train=train.max()
 
                 elif Bands[str(band_name)]==3:
                     train=train.loc[301:400]
-                    train=train.max()
-                elif Bands[str(band_name)]==4:
 
+                elif Bands[str(band_name)]==4:
                     train=train.loc[401:500]
-                    train=train.max()
+
                 elif Bands[str(band_name)]==5:
 
                     train=train.loc[501:600]
-                    train=train.max()
                 
                 values=np.array(train.values.T)
+                values=np.around(values, decimals=2, out=None)
+                #values = np.max(values[1])
                 a.append(values[1])
 
-                bands_batch.append(Bands[str(band_name)])
+                bands_batch.append(band_name)
 
                 
         a=np.array(a) 
         """Creating a conditioning vector"""
         
         _, embedded=set_conditioning(bands_batch,classes, names, classes_types,clipEmbedder,df,device)
+        embedded=torch.sum(embedded, 2)
         
         #conditioningTensor = torch.nn.functional.normalize(embedded, p=2.0, dim = 1)
         #conditioningArray=torch.FloatTensor(array)
@@ -296,12 +293,18 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,score_metr
         
             y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
             #y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
-            y_predicted=y_predicted.to(device)
+            y_predicted=torch.round(y_predicted, decimals=3).to(device)
             
-            y_truth = torch.tensor(a).to(device)
-            y_truth = torch.unsqueeze(y_truth, 1)
+
+            #print(y_predicted.shape)
+            
+            y_truth = torch.round(torch.tensor(a), decimals=3).to(device)
+            
+            #y_truth = torch.unsqueeze(y_truth,1)
+            #print(y_truth.shape)
+
+            
             loss_per_batch,running_loss, epoch_loss, acc_train,score = metrics(criterion,
-                                                                         score_metric,
                                                                          y_predicted,
                                                                          y_truth, opt,
                                                                          running_loss,
@@ -312,12 +315,19 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,score_metr
             i += 1
 
             if i % 100 ==  99:    # print every 2000 mini-batches
+            
+                #print(y_predicted,y_truth)
+
                 print(f'[{epoch + 1}, {i :5d}] loss: {loss_per_batch/y_truth.size(0):.3f} running loss:  {running_loss/100:.3f}')
                 print(f'accuracy: {acc_train/i :.3f} ')
                 print(f'Score: {score :.3f} ')
                 running_loss=0.0
+            if i % 1000 ==  999:
+                print("pred:",y_predicted)
+                print("truth",y_truth)
 
     scheduler.step()
+
     print("learning_rate: ",scheduler.get_last_lr())
 
 
@@ -413,7 +423,7 @@ def epoch_validate(epoch,model,vdataloader,device,opt,criterion,score_metric,cli
     return i_val,running_vloss,acc_validation,score
 
 
-def metrics(criterion,score_metric,y_predicted,y_truth, opt,running_loss,epoch_loss,acc_train,train=True):
+def metrics(criterion,y_predicted,y_truth, opt,running_loss,epoch_loss,acc_train,train=True):
 
     loss_per_batch=0
 
@@ -429,36 +439,19 @@ def metrics(criterion,score_metric,y_predicted,y_truth, opt,running_loss,epoch_l
     # Metrics
     # compute the R2 score
 
-    score_metric.update([y_predicted, y_truth])
-    score = score_metric.compute()
-
-    # Accuracy
-    vals, idx_pred = y_predicted.topk(1,dim=0)  
-    vals, idx_truth = y_truth.topk(1, dim=0)  
-    
-    total_truths=0
-
-    for idx,val in enumerate(idx_pred):
-        for item in val:
-            if item in idx_truth[idx]:
-                total_truths+=1
-
-    #print(total_truths)    
-    total_samples=idx_truth.size(0)*1
-
-    acc_train+=total_truths/total_samples
+    score = r2_score(y_predicted, y_truth)
+    acc_train+= score.cpu().numpy() 
 
     #Loss
+    running_loss +=loss_per_batch
 
-    running_loss +=loss_per_batch*y_truth.size(0)
     if train:
-
-        epoch_loss+=loss_per_batch*y_truth.size(0)
+        epoch_loss+=loss_per_batch
 
     return loss_per_batch,running_loss, epoch_loss, acc_train,score
 
 
-def train(opt,scheduler,criterion,score_metric,model, clipEmbedder,device, PATH):
+def train(opt,scheduler,criterion,model, clipEmbedder,device, PATH):
     #### #File reading conf
 
     loss_values, valid_loss_list = [], []
@@ -468,18 +461,25 @@ def train(opt,scheduler,criterion,score_metric,model, clipEmbedder,device, PATH)
     df = pd.read_csv("out.csv")
     
     
-    dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,1, boxImagesPath,parser.batch_size,drop_last=True)
-    vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, validationImages,parser.batch_size, drop_last=True)
+    dataloader = utils.get_data_with_labels(parser.image_size,parser.image_size,1, 
+                                            boxImagesPath,parser.batch_size,
+                                            drop_last=True,
+                                            filter="30-40")#filter disabled
+    
+    vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1,
+                                            validationImages,parser.batch_size, 
+                                            drop_last=True,
+                                            filter="30-40")
 
     for epoch in range(parser.epochs):
 
         model.train()
-        total,epoch_loss,acc_train,score_train=epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,score_metric,clipEmbedder,df)
+        total,epoch_loss,acc_train,score_train=epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedder,df)
 
         print("learning_rate: ",scheduler.get_last_lr())
         loss_values.append(epoch_loss/total )
-        print("mean Acc per epoch",acc_train/len(dataloader))
-        acc.append(acc_train/len(dataloader))
+        print("mean Acc per epoch",acc_train/total)
+        acc.append(acc_train/total)
         #print("train acc",acc)
             
         """validation"""
@@ -488,16 +488,16 @@ def train(opt,scheduler,criterion,score_metric,model, clipEmbedder,device, PATH)
         # statistics for batch normalization.
         torch.save(model.state_dict(), PATH)
 
-        model.eval()
+        #model.eval()
 
-        with torch.no_grad():
+        # with torch.no_grad():
             
-            i_val,running_vloss,acc_validation,score_val = epoch_validate(epoch,model,vdataloader,device,opt,criterion,score_metric,clipEmbedder,df)
-            valid_loss_list.append(running_vloss/i_val)
-            acc_val.append(acc_validation)
+        #     i_val,running_vloss,acc_validation,score_val = epoch_validate(epoch,model,vdataloader,device,opt,criterion,score_metric,clipEmbedder,df)
+        #     valid_loss_list.append(running_vloss/i_val)
+        #     acc_val.append(acc_validation)
 
     
-    return loss_values,acc,valid_loss_list,acc_val,score_train,score_val
+    return loss_values,acc,valid_loss_list,acc_val,score_train
 
 
 
@@ -506,32 +506,28 @@ def train(opt,scheduler,criterion,score_metric,model, clipEmbedder,device, PATH)
 def main():
 
     os.environ["PYTORCH_USE_CUDA_DSA"] = "1"
-    print("Access main")
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(device)
 
     arguments()
     join_simulationData()  
 
-    fwd_test, opt, criterion,score_metric,scheduler=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=1500, Y_prediction_size=1)
+    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=1000, Y_prediction_size=100)
     fwd_test = fwd_test.to(device)
     print(fwd_test)
     ClipEmbedder=CLIPTextEmbedder(version= "openai/clip-vit-large-patch14",device=device, max_length = parser.batch_size)
 
 
-    date="_RESNET_Bands_19Abr_2e-5_2epc_h1000_f1500_128_MSE"
+    date="_RESNET_Bands_21Abr_2e-5_100epc_h1000_f1000_256_MSE"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
 
-    loss_values,acc,valid_loss_list,acc_val,score_train,score_val=train(opt,
-                                                                        scheduler,
-                                                                        criterion,
-                                                                        score_metric,
-                                                                        fwd_test,
-                                                                        ClipEmbedder,
-                                                                        device,
-                                                                        PATH )
-
+    loss_values,acc,valid_loss_list,acc_val,score_train=train(opt,
+                                                            scheduler,
+                                                            criterion,
+                                                            fwd_test,
+                                                            ClipEmbedder,
+                                                            device,
+                                                            PATH )
 
     torch.save(fwd_test.state_dict(), PATH)
 
@@ -556,7 +552,7 @@ def main():
         np.savetxt('output/acc_val_'+date+'.out', [], delimiter=',')
 
     try:
-        np.savetxt('output/score_train_'+date+'.out', score, delimiter=',')
+        np.savetxt('output/score_train_'+date+'.out', score_train, delimiter=',')
     except:
         np.savetxt('output/score_train_'+date+'.out', [], delimiter=',')
 
