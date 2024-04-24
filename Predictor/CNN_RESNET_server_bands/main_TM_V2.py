@@ -179,6 +179,7 @@ def set_conditioning(bands_batch,freq_val,target,path,categories,clipEmbedder,df
         category=categories[idx]
         geometry=category#TargetGeometries[category]
         band=bands_batch[idx]
+        print(name)
         """"
         surface type: reflective, transmissive
         layers: conductor and conductor material / Substrate information
@@ -225,74 +226,77 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
     print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
     print('-' * 10)
     break_=False
+    frequency_range=np.arange(0, 100, 1)
+    frequency_range_vals=np.copy(frequency_range)
+    np.random.shuffle(frequency_range_vals)
+    #frquency_range=np.random.shuffle(np.arange(0, 100, 1))
 
-    for data in tqdm(dataloader):
-        
-        inputs, classes, names, classes_types = data
-        #sending to CUDA
-        inputs = inputs.to(device)
-        classes = classes.to(device)
-        
-        #Loading data
-        a = []
-        freqs = []
-        
-        opt.zero_grad()
-
-        bands_batch=[]
-        """lookup for data corresponding to every image in training batch"""
-        for name in names:
-
-            series=name.split('_')[-2]#
-            band_name=name.split('_')[-1].split('.')[0]#
-            batch=name.split('_')[4]
-
-            for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
-                #loading the absorption data
-                train = pd.read_csv(name)
-
-                # the band is divided in chunks 
-                # if Bands[str(band_name)]==0:
-                    
-                #     train=train.loc[1:100]
-
-                # elif Bands[str(band_name)]==1:
-                    
-                #     train=train.loc[101:200]
-
-                # elif Bands[str(band_name)]==2:
-                    
-                #     train=train.loc[201:300]
-
-                # elif Bands[str(band_name)]==3:
-                    
-                #     train=train.loc[301:400]
-
-                # elif Bands[str(band_name)]==4:
-                    
-                #     train=train.loc[401:500]
-
-                # elif Bands[str(band_name)]==5:
-
-                #     train=train.loc[501:600]
-                
-                train=train.loc[401:500]
-
-                values=np.array(train.values.T)
-                values=np.around(values, decimals=2, out=None)
-                #values = np.max(values[1])
-                a.append(values[1])
-                bands_batch.append(band_name)
-                freqs=values[0]
- 
-        a=np.array(a) 
-
-        for indx,freq_val in enumerate(freqs):
+    for freq_indx in frequency_range_vals:
+        for data in tqdm(dataloader):
             
+            inputs, classes, names, classes_types = data
+            #sending to CUDA
+            inputs = inputs.to(device)
+            classes = classes.to(device)
+            
+            #Loading data
+            a = []
+            freqs = []
+            
+            opt.zero_grad()
+
+            bands_batch=[]
+            """lookup for data corresponding to every image in training batch"""
+            for name in names:
+
+                series=name.split('_')[-2]#
+                band_name=name.split('_')[-1].split('.')[0]#
+                batch=name.split('_')[4]
+
+                for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
+                    #loading the absorption data
+                    train = pd.read_csv(name)
+
+                    # the band is divided in chunks 
+                    # if Bands[str(band_name)]==0:
+                        
+                    #     train=train.loc[1:100]
+
+                    # elif Bands[str(band_name)]==1:
+                        
+                    #     train=train.loc[101:200]
+
+                    # elif Bands[str(band_name)]==2:
+                        
+                    #     train=train.loc[201:300]
+
+                    # elif Bands[str(band_name)]==3:
+                        
+                    #     train=train.loc[301:400]
+
+                    # elif Bands[str(band_name)]==4:
+                        
+                    #     train=train.loc[401:500]
+
+                    # elif Bands[str(band_name)]==5:
+
+                    #     train=train.loc[501:600]
+                    
+                    train=train.loc[401:500]
+
+                    values=np.array(train.values.T)
+                    values=np.around(values, decimals=2, out=None)
+                    #values = np.max(values[1])
+                    a.append(values[1])
+                    bands_batch.append(band_name)
+                    freqs=values[0]
+    
+            a=np.array(a) 
+
 
             """Creating a conditioning vector"""
             
-            _, embedded=set_conditioning(bands_batch,freq_val,classes, names, classes_types,clipEmbedder,df,device)
+            _, embedded=set_conditioning(bands_batch,freqs[freq_indx],classes, names, classes_types,clipEmbedder,df,device)
             embedded=torch.sum(embedded, 2)
 
             """showing embedding image"""
@@ -309,6 +313,7 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
 
                 y_predicted=y_predicted.to(device)
                                 
+                indx=np.where(frequency_range==freqs[freq_indx])[0][0]
                 y_truth = torch.tensor(a[:,indx]).to(device)
                 y_truth =  torch.unsqueeze(y_truth, 1)
 
@@ -333,8 +338,8 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
                 #if i % 1000 ==  999:
                     
 
-        scheduler.step()
-        print("learning_rate: ",scheduler.get_last_lr())
+    scheduler.step()
+    print("learning_rate: ",scheduler.get_last_lr())
 
     return i,epoch_loss,acc_train,score
 
