@@ -86,7 +86,7 @@ def arguments():
 
     parser.run_name = "Predictor Training"
     parser.epochs = 50
-    parser.batch_size = 100
+    parser.batch_size = 70
     parser.workers=0
     parser.gpu_number=1
     parser.image_size = 256
