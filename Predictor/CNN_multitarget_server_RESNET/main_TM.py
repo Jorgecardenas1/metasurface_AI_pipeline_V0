@@ -215,6 +215,7 @@ def set_conditioning(target,path,categories,clipEmbedder,df,device):
         iteration=series.split('-')[-1]
         row=df[(df['sim_id']==batch) & (df['iteration']==int(iteration))  ]
 
+        print(row)
         
         target_val=target[idx]
         category=categories[idx]

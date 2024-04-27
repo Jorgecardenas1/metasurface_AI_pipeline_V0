@@ -59,7 +59,9 @@ print("Device:", device)
 
 parser = argparse.ArgumentParser()
 
-boxImagesPath="../../../data/MetasufacesData/Images-512-Bands/"
+#boxImagesPath="../../../data/MetasufacesData/Images-512-Bands/"
+boxImagesPath="../../../data/MetasufacesData/Images-512-Suband/"
+
 DataPath="../../../data/MetasufacesData/Exports/output/"
 simulationData="../../../data/MetasufacesData/DBfiles/"
 validationImages="../../../data/MetasufacesData/testImages/"
@@ -130,6 +132,8 @@ def train(model, PATH):
     #### #File reading conf
 
 
+    df = pd.read_csv("out.csv")
+
     """using weigth decay regularization"""
     opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.9, 0.999),weight_decay=1e-2)
     criterion = nn.MSELoss()
@@ -188,6 +192,9 @@ def train(model, PATH):
 
             a = [] #array with truth values
             bands_batch=[]
+            freqs = []
+
+
             """lookup for data corresponding to every image in training batch"""
             for name in names:
                 series=name.split('_')[-2]#
@@ -200,40 +207,50 @@ def train(model, PATH):
                     #loading the absorption data
                     train = pd.read_csv(name)
                     # the band is divided in chunks 
-                    if Bands[str(band_name)]==0:
+                    # if Bands[str(band_name)]==0:
 
-                        train=train.loc[1:100]
+                    #     train=train.loc[1:100]
 
-                    elif Bands[str(band_name)]==1:
+                    # elif Bands[str(band_name)]==1:
 
-                        train=train.loc[101:200]
+                    #     train=train.loc[101:200]
                      
-                    elif Bands[str(band_name)]==2:
+                    # elif Bands[str(band_name)]==2:
 
-                        train=train.loc[201:300]
+                    #     train=train.loc[201:300]
 
-                    elif Bands[str(band_name)]==3:
-                        train=train.loc[301:400]
+                    # elif Bands[str(band_name)]==3:
+                    #     train=train.loc[301:400]
 
-                    elif Bands[str(band_name)]==4:
+                    # elif Bands[str(band_name)]==4:
 
-                        train=train.loc[401:500]
+                    #     train=train.loc[401:500]
 
-                    elif Bands[str(band_name)]==5:
+                    # elif Bands[str(band_name)]==5:
 
-                        train=train.loc[501:600]
+                    #     train=train.loc[501:600]
                     
-                    
+                    train=train.loc[401:500]
                     values=np.array(train.values.T)
-                    a.append(values[1])
+                    values=np.around(values, decimals=2, out=None)
 
-                    bands_batch.append(Bands[str(band_name)])
+                    all_frequencies=values[0]
+
+                    values = torch.tensor(values).to(device)
+                    print(values.shape)
+
+                    top,indx=values[1].topk(3,dim=0) 
+                    a.append(top)
+                    bands_batch.append(band_name)
+                
+                    #Creating the batch of maximum frequencies
+                    freqs.append(all_frequencies[indx])
 
 
             a=np.array(a) 
 
             #Aun sin CLIP
-            conditioningArray=torch.FloatTensor(set_conditioning(bands_batch,classes, names, classes_types))
+            conditioningArray=torch.FloatTensor(set_conditioning(bands_batch,all_frequencies,classes, names, classes_types,df))
             #conditioningTensor = torch.nn.functional.normalize(conditioningArray, p=2.0, dim = 1)
 
             y_predicted = model(images,condition=conditioningArray.to(device))
@@ -382,8 +399,7 @@ def metrics():
 
 
            
-def set_conditioning(bands_batch,target,path,categories):
-    df = pd.read_csv("out.csv")
+def set_conditioning(bands_batch,freq_val,target,path,categories, df):
     arr=[]
     for idx,name in enumerate(path):
         series=name.split('_')[-2]#.split('.')[0]
@@ -421,7 +437,7 @@ def set_conditioning(bands_batch,target,path,categories):
             sustratoHeight= json.loads(row["paramValues"].values[0])
             sustratoHeight= sustratoHeight[-1]
         
-        arr.append([geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band,1,1,1,1])
+        arr.append([geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band,str(freq_val[idx])])
     return arr
 
 def join_simulationData():
