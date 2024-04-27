@@ -20,6 +20,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optimizer
 
+import torch.nn.functional as f
+
 from torchsummary import summary
 from torch.utils.data import TensorDataset
 from torch.utils.data import DataLoader
@@ -93,7 +95,7 @@ def arguments():
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
     parser.learning_rate =2e-5
-    parser.condition_len = 768*50
+    parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
 
     categories=["box", "circle", "cross"]
@@ -270,16 +272,16 @@ def set_conditioning(bands_batch,freq_val,target,path,categories,clipEmbedder,df
         embedding=clipEmbedder(prompts=datos)   
 
         """clip"""
-        #embedding=embedding[:,0:50:,:]
+        embedding=embedding[:,0:50:,:]
         """Bert"""
-        embedding=embedding[0][:,0:50:,:]
+        # embedding=embedding[0][:,0:50:,:]
 
         arr.append( embedding)
     
     embedding = torch.cat(arr, dim=0)
 
     """ Values array solo pouede llenarse con n+umero y no con textos"""
-    #values_array = torch.Tensor(values_array)
+    # values_array = torch.Tensor(values_array)
     return values_array, embedding
 
 
@@ -302,11 +304,8 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
         classes = classes.to(device)
         
         #Loading data
-        a = []
-        freqs = []
-        
+        a = []        
         opt.zero_grad()
-
         bands_batch=[]
         """lookup for data corresponding to every image in training batch"""
         for name in names:
@@ -348,30 +347,32 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
 
                 values=np.array(train.values.T)
                 values=np.around(values, decimals=2, out=None)
+
                 max_val = np.max(values[1])
                 max_indx = np.argmax(values[1])
-                a.append(max_val)
-                bands_batch.append(band_name)
                 all_frequencies=values[0]
 
+                a.append([max_val,all_frequencies[max_indx]])
+                bands_batch.append(band_name)
+
                 #Creating the batch of maximum frequencies
-                freqs.append(all_frequencies[max_indx])
 
         a=np.array(a) 
-
 
         """Creating a conditioning vector"""
         
         _, embedded=set_conditioning(bands_batch,all_frequencies,classes, names, classes_types,clipEmbedder,df,device)
-        embedded=embedded.view(parser.batch_size,parser.condition_len)
+        #embedded=embedded.view(parser.batch_size,parser.condition_len)
+        embedded = embedded.mean(1)
+        
         """showing embedding image"""
 
         # plot =  embedded.clone().detach().cpu()
 
-        # l1 = nn.Linear(parser.condition_len, parser.image_size*parser.image_size*3, bias=False)           
+        # l1 = nn.Linear(parser.condition_len, parser.image_size*parser.image_size*3, bias=True)           
         # x2 = l1(plot) #Size must be taken care = 800 in this case
         # x2 = x2.reshape(int(70),3,parser.image_size,parser.image_size)
-        # x2 = torchvision.transforms.Normalize([0.5, ], [0.5, ])(x2)
+        # x2 = torchvision.transforms.Normalize([0.6, ], [0.3, ],[0.8,])(x2)
         # save_image(x2[0], str(i)+'_BertEmbedding.png')
         # save_image(inputs[0], str(i)+'_image.png')
 
@@ -383,10 +384,8 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
                             
             
             y_truth = torch.tensor(a).to(device)
-            y_truth =  torch.unsqueeze(y_truth, 1)
-
-            #print(y_predicted)
-            #print(y_truth)
+            #y_truth =  torch.unsqueeze(y_truth, 1)
+            #y_truth = torch.nn.functional.normalize(y_truth, p=1.0, dim=1, eps=1e-12, out=None)
 
             loss_per_batch,running_loss, epoch_loss, acc_train,score = metrics(criterion,
                                                                         y_predicted,
@@ -591,7 +590,7 @@ def main():
     arguments()
     join_simulationData()  
 
-    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=1000, Y_prediction_size=1)
+    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=1000, Y_prediction_size=2)
     fwd_test = fwd_test.to(device)
 
     print(fwd_test)
@@ -601,14 +600,14 @@ def main():
     Bert=BERTTextEmbedde(device=device, max_length = parser.batch_size)
 
 
-    date="_RESNET_Bands_26Abr_2e-5_50epc_h1000_f1000_128_MSE_MAXVAL_BertConditional"
+    date="_RESNET_Bands_27Abr_2e-5_50epc_h1000_f1000_128_MSE_MAXVAL_BertConditional_2out"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
 
     loss_values,acc,valid_loss_list,acc_val,score_train=train(opt,
                                                             scheduler,
                                                             criterion,
                                                             fwd_test,
-                                                            Bert,
+                                                            ClipEmbedder,
                                                             device,
                                                             PATH )
 
