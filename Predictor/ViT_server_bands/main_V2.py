@@ -23,6 +23,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data as data
 import torch.optim as optimizer
+from torcheval.metrics.functional import r2_score
+from torchvision.utils import save_image
+from transformers import BertTokenizer, BertModel, BertConfig,BertForMaskedLM
+from typing import List
 
 import torchvision
 
@@ -61,7 +65,6 @@ parser = argparse.ArgumentParser()
 
 #boxImagesPath="../../../data/MetasufacesData/Images-512-Bands/"
 boxImagesPath="../../../data/MetasufacesData/Images-512-Suband/"
-
 DataPath="../../../data/MetasufacesData/Exports/output/"
 simulationData="../../../data/MetasufacesData/DBfiles/"
 validationImages="../../../data/MetasufacesData/testImages/"
@@ -96,11 +99,11 @@ def arguments():
     parser.batch_size = 100
     parser.workers=0
     parser.gpu_number=1
-    parser.image_size = 512
+    parser.image_size = 128
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
     parser.learning_rate = 1e-4
-    parser.condition_len = 10
+    parser.condition_len = 768
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
     parser.patch_size=16
 
@@ -108,25 +111,171 @@ def arguments():
     model_kwargs={
             "batch_size":parser.batch_size,
             "embed_dim":  3 * (parser.patch_size)**2 ,
-            "hidden_dim":  2*(3 * (parser.patch_size)**2),
+            "hidden_dim":  2*(3* (parser.patch_size)**2),
             "num_heads": 8, #probar menos
             "num_layers": 4, #probar menos
             "patch_size": parser.patch_size,
             "num_channels": 3,
+            "con_num_channels": 3,
             "num_patches": (parser.image_size//parser.patch_size)**2,
-            "num_classes": 100,
+            "num_classes": 2,
             "dropout": 0.2,
             "image_size":parser.image_size,
             "conditionalIn":True,
-            "conditionalLen":10
+            "conditionalLen":768
         }
-
-
 
 
     return model_kwargs
 
 
+class BERTTextEmbedde(nn.Module):
+    def __init__(self, version: str = "'bert-base-uncased", device="cuda:0", max_length: int = 15):
+        """
+        :param version: is the model version
+        :param device: is the device
+        :param max_length: is the max length of the tokenized prompt
+        """
+        super().__init__()
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.model = BertForMaskedLM.from_pretrained('bert-base-uncased', output_hidden_states=True)
+        self.model.eval()
+
+        self.device = device
+        self.max_length = max_length
+
+    def forward(self, prompts: List[str]):
+        """
+        :param prompts: are the list of prompts to embed
+        """
+        tokens = self.tokenizer.tokenize(prompts)
+        indexed_tokens = self.tokenizer.convert_tokens_to_ids(tokens)
+        segments_ids = [1] * len(tokens)
+
+        tokens_tensor = torch.tensor([indexed_tokens])
+        segments_tensors = torch.tensor([segments_ids])
+
+        with torch.no_grad():
+
+            outputs = self.model(tokens_tensor, segments_tensors)
+
+        hidden_states = outputs[1]
+        
+        # print(hidden_states[0].size())
+        # print ("Number of layers:", len(hidden_states), "  (initial embeddings + 12 BERT layers)")
+        # layer_i = 0
+
+        # print ("Number of batches:", len(hidden_states[layer_i]))
+        # batch_i = 0
+
+        # print ("Number of tokens:", len(hidden_states[layer_i][batch_i]))
+        # token_i = 0
+
+        # print ("Number of hidden units:", len(hidden_states[layer_i][batch_i][token_i]))
+
+        return hidden_states
+    
+
+def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedder,df):
+    i=0 #iteration
+    running_loss = 0. 
+    epoch_loss = 0.
+    acc_train=0.0
+    bands_batch=[]
+
+    print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
+    print('-' * 10)
+    
+    for data in tqdm(dataloader):
+        
+        inputs, classes, names, classes_types = data
+        #sending to CUDA
+        inputs = inputs.to(device)
+        classes = classes.to(device)
+        
+        #Loading data
+        a = []        
+        opt.zero_grad()
+        bands_batch=[]
+        """lookup for data corresponding to every image in training batch"""
+        for name in names:
+
+            series=name.split('_')[-2]#
+            band_name=name.split('_')[-1].split('.')[0]#
+            batch=name.split('_')[4]
+
+            for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
+                #loading the absorption data
+                train = pd.read_csv(name)
+
+    
+                train=train.loc[401:500]
+
+                values=np.array(train.values.T)
+                values=np.around(values, decimals=2, out=None)
+
+                max_val = np.max(values[1])
+                max_indx = np.argmax(values[1])
+                all_frequencies=values[0]
+
+                a.append([max_val,all_frequencies[max_indx]])
+                bands_batch.append(band_name)
+
+                #Creating the batch of maximum frequencies
+
+        a=np.array(a) 
+
+        """Creating a conditioning vector"""
+        
+        conditioningArray, embedded=set_conditioning(bands_batch,all_frequencies,classes, names, classes_types,clipEmbedder,df,device)
+        #print(embedded)
+        #embedded=embedded.view(parser.batch_size,parser.condition_len)
+        embedded = embedded.mean(1)
+        """showing embedding image"""
+
+        # plot =  embedded.clone().detach().cpu()
+
+        # l1 = nn.Linear(parser.condition_len, parser.image_size*parser.image_size*3, bias=True)           
+        # x2 = l1(plot) #Size must be taken care = 800 in this case
+        # x2 = x2.reshape(int(parser.batch_size),3,parser.image_size,parser.image_size)
+        # x2 = torchvision.transforms.Normalize([0.25, ], [.1, ],[0.3,])(x2)
+        # save_image(x2[0], str(i)+'_No.png')
+        # save_image(inputs[0], str(i)+'_image.png')
+
+
+        y_predicted = model(inputs,condition=embedded.to(device))
+        y_predicted=y_predicted.to(device)
+                                    
+        y_truth = torch.tensor(a).to(device)
+        print(y_predicted)
+        print(y_truth)
+        #y_truth =  torch.unsqueeze(y_truth, 1)
+        #y_truth = torch.nn.functional.normalize(y_truth, p=1.0, dim=1, eps=1e-12, out=None)
+
+        loss_per_batch,running_loss, epoch_loss, acc_train,score = metrics(criterion,
+                                                                    y_predicted,
+                                                                    y_truth, opt,
+                                                                    running_loss,
+                                                                    epoch_loss,
+                                                                    acc_train,
+                                                                    train=True)
+        i += 1
+
+        if i % 100 ==  99:    # print every 2000 mini-batches
+        
+            #print(y_predicted,y_truth)
+
+            print(f'[{epoch + 1}, {i :5d}] loss: {loss_per_batch/y_truth.size(0):.3f} running loss:  {running_loss/100:.3f}')
+            print(f'accuracy: {acc_train/i :.3f} ')
+            print(f'Score: {score :.3f} ')
+            running_loss=0.0
+        #if i % 1000 ==  999:
+                
+
+    scheduler.step()
+    print("learning_rate: ",scheduler.get_last_lr())
+
+    return i,epoch_loss,acc_train,score
     
 def train(model, PATH):
     #### #File reading conf
@@ -137,8 +286,9 @@ def train(model, PATH):
     """using weigth decay regularization"""
     opt = optimizer.Adam(model.parameters(), lr=parser.learning_rate, betas=(0.9, 0.999),weight_decay=1e-2)
     criterion = nn.MSELoss()
+    Bert=BERTTextEmbedde(device=device, max_length = parser.batch_size)
 
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.95)
 
     loss_per_batch=0
     loss_per_val_batch=0
@@ -156,261 +306,79 @@ def train(model, PATH):
     #vdataloader = utils.get_data_with_labels(parser.image_size, parser.image_size,1, validationImages,parser.batch_size, drop_last=True)
 
     for epoch in range(parser.epochs):
-
-        i=0 #iteration
-        i_val=0 #running over validation set
-
-        running_loss = 0. 
-        epoch_loss = 0.
-        running_vloss = 0.0 #over validation set
-        total_correct = 0
-        acc_validation=0.0
-        acc_train=0.0
-        
-        total_samples=0
-        total_samples_val=0.0
-
-        print('Epoch {}/{}'.format(epoch, parser.epochs - 1))
-        print('-' * 10)
-        
-        #dataloader = utils.get_data_with_labels(512, 512,0.9, boxImagesPath,parser.batch_size,drop_last=True)
-
-        #Training
-        model.train()
-
-        """batch"""
-        for data in tqdm(dataloader):
             
-            #if parser.device!='cpu':
-            images, classes, names, classes_types = data
+        total,epoch_loss,acc_train,score_train=epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,Bert,df)
+
+        print("learning_rate: ",scheduler.get_last_lr())
+        loss_values.append(epoch_loss/total )
+        print("mean Acc per epoch",acc_train/total)
+        acc.append(acc_train/total)
+        #print("train acc",acc)
             
-            images = images.to(device)
-            classes = classes.to(device)
-            #else:
-            #    images, classes, names, classes_types = data
-            opt.zero_grad()
-
-            a = [] #array with truth values
-            bands_batch=[]
-            freqs = []
-
-
-            """lookup for data corresponding to every image in training batch"""
-            for name in names:
-                series=name.split('_')[-2]#
-                band_name=name.split('_')[-1].split('.')[0]#
-
-                batch=name.split('_')[4]
-
-                for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
-                    
-                    #loading the absorption data
-                    train = pd.read_csv(name)
-                    # the band is divided in chunks 
-                    # if Bands[str(band_name)]==0:
-
-                    #     train=train.loc[1:100]
-
-                    # elif Bands[str(band_name)]==1:
-
-                    #     train=train.loc[101:200]
-                     
-                    # elif Bands[str(band_name)]==2:
-
-                    #     train=train.loc[201:300]
-
-                    # elif Bands[str(band_name)]==3:
-                    #     train=train.loc[301:400]
-
-                    # elif Bands[str(band_name)]==4:
-
-                    #     train=train.loc[401:500]
-
-                    # elif Bands[str(band_name)]==5:
-
-                    #     train=train.loc[501:600]
-                    
-                    train=train.loc[401:500]
-                    values=np.array(train.values.T)
-                    values=np.around(values, decimals=2, out=None)
-
-                    all_frequencies=values[0]
-
-                    values = torch.tensor(values).to(device)
-                    print(values.shape)
-
-                    top,indx=values[1].topk(3,dim=0) 
-                    a.append(top)
-                    bands_batch.append(band_name)
-                
-                    #Creating the batch of maximum frequencies
-                    freqs.append(all_frequencies[indx])
-
-
-            a=np.array(a) 
-
-            #Aun sin CLIP
-            conditioningArray=torch.FloatTensor(set_conditioning(bands_batch,all_frequencies,classes, names, classes_types,df))
-            #conditioningTensor = torch.nn.functional.normalize(conditioningArray, p=2.0, dim = 1)
-
-            y_predicted = model(images,condition=conditioningArray.to(device))
-            y_predicted=y_predicted.to(device)
-            
-            y_truth = torch.tensor(a).to(device)
-
-            errD_real = criterion(y_predicted.float(), y_truth.float())     
-
-            errD_real.backward()
-            loss_per_batch=errD_real.item()
-
-            opt.step()
-
-
-            vals, idx_pred = y_predicted.topk(10,dim=1)  
-            vals, idx_truth = y_truth.topk(10, dim=1)  
-            
-            total_truths=0
-
-            for idx,val in enumerate(idx_pred):
-                for item in val:
-                    if item in idx_truth[idx]:
-                        total_truths+=1
-
-            total_samples=idx_truth.size(0)*10
-            acc_train+=total_truths/total_samples
-
-            #Loss
-            running_loss +=loss_per_batch*y_truth.size(0)
-            epoch_loss+=loss_per_batch*y_truth.size(0)
-
-            i += 1
-
-            if i % 100 ==  99:    # print every 2000 mini-batches
-                print(f'[{epoch + 1}, {i :5d}] loss: {loss_per_batch/y_truth.size(0):.3f} running loss:  {running_loss/100:.3f}')
-                print(f'accuracy: {acc_train/i :.3f} ')
-                running_loss=0.0
-
-
-
-        loss_values.append(epoch_loss/i )
-        print("mean Acc per epoch",acc_train/len(dataloader))
-        acc.append(acc_train/len(dataloader))
-        
-
         """validation"""
 
         # Set the model to evaluation mode, disabling dropout and using population
         # statistics for batch normalization.
         torch.save(model.state_dict(), PATH)
 
-        # model.eval()
+        #model.eval()
 
         # with torch.no_grad():
-        #     for vdata in tqdm(vdataloader):
-        #         images, classes, names, classes_types = data = vdata
-                
-
-        #         images = images.to(device)
-        #         classes = classes.to(device)
-
-        #         a = [] #array with truth values
-
-        #         bands_batch =[]
-
-        #         """lookup for data corresponding to every image in training batch"""
-        #         for name in names:
-        #             series=name.split('_')[-2]#
-        #             band_name=name.split('_')[-1].split('.')[0]#
-
-        #             batch=name.split('_')[4]
-
-        #             for name in glob.glob(DataPath+batch+'/files/'+'/'+parser.metricType+'*'+series+'.csv'): 
-                        
-        #                 #loading the absorption data
-        #                 train = pd.read_csv(name)
-                        
-        #                 # the band is divided in chunks 
-        #                 if Bands[str(band_name)]==0:
-
-        #                     train=train.loc[1:100]
-
-        #                 elif Bands[str(band_name)]==1:
-
-        #                     train=train.loc[101:200]
-                        
-        #                 elif Bands[str(band_name)]==2:
-
-        #                     train=train.loc[201:300]
-
-        #                 elif Bands[str(band_name)]==3:
-        #                     train=train.loc[301:400]
-
-        #                 elif Bands[str(band_name)]==4:
-
-        #                     train=train.loc[401:500]
-
-        #                 elif Bands[str(band_name)]==5:
-
-        #                     train=train.loc[501:600]
-                        
-                        
-        #                 values=np.array(train.values.T)
-        #                 a.append(values[1])
-        #                 bands_batch.append(Bands[str(band_name)])
-
-                        
-        #         a=np.array(a)   
-        #         #Aun sin CLIP
-        #         conditioningArray=torch.FloatTensor(set_conditioning(bands_batch,classes, names, classes_types))
-        #         #conditioningTensor = torch.nn.functional.normalize(conditioningArray, p=2.0, dim = 1)
-
-        #         y_predicted = model(images,condition=conditioningArray.to(device))
-        #         #y_predicted=torch.nn.functional.normalize(y_predicted, p=2.0, dim = 1)
-                
-        #         y_predicted=y_predicted.to(device)
-
-        #         y_truth = torch.tensor(a).to(device)
-
-        #         loss_per_val_batch = criterion(y_predicted.float(), y_truth.float())
-
-
-        #         #predicted = torch.max(y_predicted, 1) #indice del máximo  
-        #         vals, idx_pred = y_predicted.topk(10,dim=1)  
-        #         vals, idx_truth = y_truth.topk(10, dim=1) 
-
-        #         total_correct += (idx_pred == idx_truth).sum().item()
             
-        #         total_samples_val += y_truth.size(0)*10
-        #         acc_validation = total_correct / total_samples_val
-
-        #     #Loss
-        #         running_vloss += loss_per_val_batch.item()*y_truth.size(0)
-        #         i_val+=1
-
+        #     i_val,running_vloss,acc_validation,score_val = epoch_validate(epoch,model,vdataloader,device,opt,criterion,score_metric,clipEmbedder,df)
         #     valid_loss_list.append(running_vloss/i_val)
         #     acc_val.append(acc_validation)
 
+    
+    return loss_values,acc,valid_loss_list,acc_val,score_train
 
+def metrics(criterion,y_predicted,y_truth, opt,running_loss,epoch_loss,acc_train,train=True):
 
-    return loss_values,acc,valid_loss_list,acc_val
+    loss_per_batch=0
 
-def metrics():
-    pass
+    errD_real = criterion(y_predicted.float(), y_truth.float())  
+
+    if train:
+        errD_real.backward()
+        loss_per_batch=errD_real.item()
+        opt.step()
+    else:
+        loss_per_batch=errD_real.item()
+
+    # Metrics
+    # compute the R2 score
+
+    score = r2_score(y_predicted, y_truth)
+    acc_train+= score.cpu().numpy() 
+
+    #Loss
+    running_loss +=loss_per_batch
+
+    if train:
+        epoch_loss+=loss_per_batch
+
+    return loss_per_batch,running_loss, epoch_loss, acc_train,score
+
 
 
            
-def set_conditioning(bands_batch,freq_val,target,path,categories, df):
+# Conditioning
+def set_conditioning(bands_batch,freq_val,target,path,categories,clipEmbedder,df,device):
+    
     arr=[]
+    values_array=[]
     for idx,name in enumerate(path):
-        series=name.split('_')[-2]#.split('.')[0]
+
+        series=name.split('_')[-2]
         batch=name.split('_')[4]
         iteration=series.split('-')[-1]
         row=df[(df['sim_id']==batch) & (df['iteration']==int(iteration))  ]
+        #print(batch)
+        #print(iteration)
 
-        
         target_val=target[idx]
         category=categories[idx]
-        geometry=TargetGeometries[category]
+        geometry=category#TargetGeometries[category]
         band=bands_batch[idx]
 
         """"
@@ -418,14 +386,14 @@ def set_conditioning(bands_batch,freq_val,target,path,categories, df):
         layers: conductor and conductor material / Substrate information
         """
         surfacetype=row["type"].values[0]
-        surfacetype=Surfacetypes[surfacetype]
+        surfacetype=surfacetype#Surfacetypes[surfacetype]
         
         layers=row["layers"].values[0]
         layers= layers.replace("'", '"')
         layer=json.loads(layers)
         
-        materialconductor=Materials[layer['conductor']['material']]
-        materialsustrato=Substrates[layer['substrate']['material']]
+        materialconductor=layer['conductor']['material']#Materials[layer['conductor']['material']]
+        materialsustrato=layer['substrate']['material']#Substrates[layer['substrate']['material']]
         
         
         if (target_val==2): #is cross. Because an added variable to the desing 
@@ -437,8 +405,27 @@ def set_conditioning(bands_batch,freq_val,target,path,categories, df):
             sustratoHeight= json.loads(row["paramValues"].values[0])
             sustratoHeight= sustratoHeight[-1]
         
-        arr.append([geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band,str(freq_val[idx])])
-    return arr
+        datos = ""
+        datos=", ".join([str(element) for element in  ["Geometry is:"+str(geometry),"Surface type is:"+str(surfacetype),"Material conductor is:"+str(materialconductor),"Substrate is:"+str(materialsustrato),"with a height of "+str(sustratoHeight),"the band:"+band,"the frequency:"+str(freq_val[idx])]])
+        datos = "[CLS] " + datos + " [SEP]"
+        values_array.append(["Geometry is:"+str(geometry),"Surface type is:"+str(surfacetype),"Material conductor is:"+str(materialconductor),"Substrate is:"+str(materialsustrato),"with a height of "+str(sustratoHeight),"the band:"+band,"the frequency:"+str(freq_val[idx])])
+
+        embedding=clipEmbedder(prompts=datos)   
+
+        """clip"""
+        #embedding=embedding[:,0:50:,:]
+        """Bert"""
+        embedding=embedding[0][:,0:50:,:]
+
+        arr.append( embedding)
+    
+    embedding = torch.cat(arr, dim=0)
+
+    """ Values array solo pouede llenarse con n+umero y no con textos"""
+    # values_array = torch.Tensor(values_array)
+    return values_array, embedding
+
+
 
 def join_simulationData():
     df = pd.DataFrame()
@@ -460,7 +447,7 @@ def main():
     vision_transformer = Stack.VisionTransformer(**model_kwargs )
     vision_transformer.to(device)
 
-    date="MSE_1e-4"
+    date="MSE_1e-4_Bert_2out"
     PATH = 'VITtrainedModelTM_abs_'+date+'.pth'
 
     loss_values,acc,valid_loss_list,acc_val=train(vision_transformer, PATH)
