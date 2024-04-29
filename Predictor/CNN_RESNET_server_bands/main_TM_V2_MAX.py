@@ -37,11 +37,11 @@ from PIL import Image
 
 
 # Clip 
-from typing import List
 
 from torch import nn
 from transformers import CLIPTokenizer, CLIPTextModel,CLIPTextConfig
 from transformers import BertTokenizer, BertModel, BertConfig,BertForMaskedLM
+from typing import List
 
 #torch.set_printoptions(profile="full")
 #torch.manual_seed(999)
@@ -58,8 +58,8 @@ parser = argparse.ArgumentParser()
 # DataPath="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\Exports\\output\\"
 # simulationData="\\data\\francisco_pizarro\\jorge-cardenas\\data\\MetasufacesData\\DBfiles\\"
 
-#boxImagesPath="../../../data/MetasufacesData/Images-512-Bands/"
-boxImagesPath="../../../data/MetasufacesData/Images-512-Suband/"
+boxImagesPath="../../../data/MetasufacesData/Images-512-Bands/"
+#boxImagesPath="../../../data/MetasufacesData/Images-512-Suband/"
 
 DataPath="../../../data/MetasufacesData/Exports/output/"
 simulationData="../../../data/MetasufacesData/DBfiles/"
@@ -85,18 +85,20 @@ def arguments():
     parser.add_argument("learning_rate",type=float)
     parser.add_argument("condition_len",type=float) #This defines the length of our conditioning vector
     parser.add_argument("metricType",type=float) #This defines the length of our conditioning vector
+    parser.add_argument("cond_channel",type=float) #This defines the length of our conditioning vector
 
     parser.run_name = "Predictor Training"
-    parser.epochs = 50
+    parser.epochs = 5
     parser.batch_size = 70
     parser.workers=1
     parser.gpu_number=1
-    parser.image_size = 128
+    parser.image_size = 64
     parser.dataset_path = os.path.normpath('/content/drive/MyDrive/Training_Data/Training_lite/')
     parser.device = "cpu"
     parser.learning_rate =2e-5
-    parser.condition_len = 768
+    parser.condition_len = 7
     parser.metricType='AbsorbanceTM' #this is to be modified when training for different metrics.
+    parser.cond_channel=3 #this is to be modified when training for different metrics.
 
     categories=["box", "circle", "cross"]
 
@@ -115,7 +117,7 @@ def join_simulationData():
 
 def get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction_size=601):
     model = Stack.Predictor_RESNET(conditional=True, cond_input_size=parser.condition_len, 
-                                   cond_channels=3, 
+                                   cond_channels=parser.cond_channel, 
                                 ngpu=1, image_size=parser.image_size ,
                                 output_size=8, channels=3,
                                 features_num=features,hiden_num=hiden_num, #Its working with hiden nums. Features in case and extra linear layer
@@ -129,10 +131,9 @@ def get_net_resnet(device,hiden_num=1000,dropout=0.1,features=3000, Y_prediction
     #criterion = nn.CrossEntropyLoss()
     #criterion = nn.L1Loss()
     criterion=nn.MSELoss()
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.97)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.9)
 
     return model, opt, criterion , scheduler
-
 
 
 class CLIPTextEmbedder(nn.Module):
@@ -140,7 +141,7 @@ class CLIPTextEmbedder(nn.Module):
     ## CLIP Text Embedder
     """
 
-    def __init__(self, version: str = "openai/clip-vit-large-patch14", device="cuda:0", max_length: int = 30):
+    def __init__(self, version: str = "openai/clip-vit-large-patch14", device="cuda:0", max_length: int = 50):
         """
         :param version: is the model version
         :param device: is the device
@@ -171,7 +172,7 @@ class CLIPTextEmbedder(nn.Module):
     
 
 class BERTTextEmbedde(nn.Module):
-    def __init__(self, version: str = "'bert-base-uncased", device="cuda:0", max_length: int = 15):
+    def __init__(self, version: str = "'bert-base-uncased", device="cuda:0", max_length: int = 50):
         """
         :param version: is the model version
         :param device: is the device
@@ -227,7 +228,6 @@ def set_conditioning(bands_batch,freq_val,target,path,categories,clipEmbedder,df
     arr=[]
     values_array=[]
     for idx,name in enumerate(path):
-
         series=name.split('_')[-2]
         batch=name.split('_')[4]
         iteration=series.split('-')[-1]
@@ -237,7 +237,7 @@ def set_conditioning(bands_batch,freq_val,target,path,categories,clipEmbedder,df
 
         target_val=target[idx]
         category=categories[idx]
-        geometry=category#TargetGeometries[category]
+        geometry=TargetGeometries[category]
         band=bands_batch[idx]
 
         """"
@@ -245,14 +245,14 @@ def set_conditioning(bands_batch,freq_val,target,path,categories,clipEmbedder,df
         layers: conductor and conductor material / Substrate information
         """
         surfacetype=row["type"].values[0]
-        surfacetype=surfacetype#Surfacetypes[surfacetype]
+        surfacetype=Surfacetypes[surfacetype]
         
         layers=row["layers"].values[0]
         layers= layers.replace("'", '"')
         layer=json.loads(layers)
         
-        materialconductor=layer['conductor']['material']#Materials[layer['conductor']['material']]
-        materialsustrato=layer['substrate']['material']#Substrates[layer['substrate']['material']]
+        materialconductor=Materials[layer['conductor']['material']]
+        materialsustrato=Substrates[layer['substrate']['material']]
         
         
         if (target_val==2): #is cross. Because an added variable to the desing 
@@ -265,21 +265,22 @@ def set_conditioning(bands_batch,freq_val,target,path,categories,clipEmbedder,df
             sustratoHeight= sustratoHeight[-1]
         
         datos = ""
-        datos=", ".join([str(element) for element in  ["Geometry is:"+str(geometry),"Surface type is:"+str(surfacetype),"Material conductor is:"+str(materialconductor),"Substrate is:"+str(materialsustrato),"with a height of "+str(sustratoHeight),"the band:"+band,"the frequency:"+str(freq_val[idx])]])
+        # datos=", ".join([str(element) for element in  ["Geometry is:"+str(geometry),"Surface type is:"+str(surfacetype),"Material conductor is:"+str(materialconductor),"Substrate is:"+str(materialsustrato),"with a height of "+str(sustratoHeight),"the band:"+band,"the frequency:"+str(freq_val[idx])]])
+        datos=", ".join([str(element) for element in [geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band,freq_val[idx]]])
         datos = "[CLS] " + datos + " [SEP]"
-        values_array.append(["Geometry is:"+str(geometry),"Surface type is:"+str(surfacetype),"Material conductor is:"+str(materialconductor),"Substrate is:"+str(materialsustrato),"with a height of "+str(sustratoHeight),"the band:"+band,"the frequency:"+str(freq_val[idx])])
+
+        values_array.append(torch.Tensor([geometry,surfacetype,materialconductor,materialsustrato,sustratoHeight,band,freq_val[idx]]))
 
         embedding=clipEmbedder(prompts=datos)   
-
         """clip"""
-        embedding=embedding[:,0:50:,:]
+        #embedding=embedding[:,0:50:,:]
         """Bert"""
-        # embedding=embedding[0][:,0:50:,:]
+        #embedding=embedding[0][:,0:50:,:]
 
         arr.append( embedding)
     
-    embedding = torch.cat(arr, dim=0)
-
+    #embedding = torch.stack(arr)
+    values_array = torch.stack(values_array)
     """ Values array solo pouede llenarse con n+umero y no con textos"""
     # values_array = torch.Tensor(values_array)
     return values_array, embedding
@@ -307,6 +308,7 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
         a = []        
         opt.zero_grad()
         bands_batch=[]
+        max_freqs = []
         """lookup for data corresponding to every image in training batch"""
         for name in names:
 
@@ -319,31 +321,31 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
                 train = pd.read_csv(name)
 
                 # # the band is divided in chunks 
-                # if Bands[str(band_name)]==0:
+                if Bands[str(band_name)]==0:
                     
-                #     train=train.loc[1:100]
+                    train=train.loc[1:100]
 
-                # elif Bands[str(band_name)]==1:
+                elif Bands[str(band_name)]==1:
                     
-                #     train=train.loc[101:200]
+                    train=train.loc[101:200]
 
-                # elif Bands[str(band_name)]==2:
+                elif Bands[str(band_name)]==2:
                     
-                #     train=train.loc[201:300]
+                    train=train.loc[201:300]
 
-                # elif Bands[str(band_name)]==3:
+                elif Bands[str(band_name)]==3:
                     
-                #     train=train.loc[301:400]
+                    train=train.loc[301:400]
 
-                # elif Bands[str(band_name)]==4:
+                elif Bands[str(band_name)]==4:
                     
-                #     train=train.loc[401:500]
+                    train=train.loc[401:500]
 
-                # elif Bands[str(band_name)]==5:
+                elif Bands[str(band_name)]==5:
 
-                #     train=train.loc[501:600]
+                    train=train.loc[501:600]
                 
-                train=train.loc[401:500]
+                #train=train.loc[401:500]
 
                 values=np.array(train.values.T)
                 values=np.around(values, decimals=2, out=None)
@@ -352,33 +354,34 @@ def epoch_train(epoch,model,dataloader,device,opt,scheduler,criterion,clipEmbedd
                 max_indx = np.argmax(values[1])
                 all_frequencies=values[0]
 
-                a.append([max_val,all_frequencies[max_indx]])
-                bands_batch.append(band_name)
+                #a.append([max_val,all_frequencies[max_indx]])
+                a.append([max_val])
+                bands_batch.append(Bands[band_name])
+                max_freqs.append(all_frequencies[max_indx])
 
                 #Creating the batch of maximum frequencies
 
-        a=np.array(a) 
-
+        print(len(a))
         """Creating a conditioning vector"""
         
-        _, embedded=set_conditioning(bands_batch,all_frequencies,classes, names, classes_types,clipEmbedder,df,device)
+        array, embedded=set_conditioning(bands_batch,max_freqs,classes, names, classes_types,clipEmbedder,df,device)
         #embedded=embedded.view(parser.batch_size,parser.condition_len)
-        embedded = embedded.mean(1)
-        
+        #embedded = embedded.mean(1)
         """showing embedding image"""
 
-        # plot =  embedded.clone().detach().cpu()
+        # plot =  array.clone().detach().cpu()
 
-        # l1 = nn.Linear(parser.condition_len, parser.image_size*parser.image_size*3, bias=True)           
+        # l1 = nn.Linear(parser.condition_len, parser.image_size*parser.image_size*parser.cond_channel, bias=True)           
         # x2 = l1(plot) #Size must be taken care = 800 in this case
-        # x2 = x2.reshape(int(70),3,parser.image_size,parser.image_size)
-        # x2 = torchvision.transforms.Normalize([0.6, ], [0.3, ],[0.8,])(x2)
+        # m = nn.Tanh()
+        # x2 = m(x2)
+        # x2 = x2.reshape(int(parser.batch_size),parser.cond_channel,parser.image_size,parser.image_size)
         # save_image(x2[0], str(i)+'_BertEmbedding.png')
         # save_image(inputs[0], str(i)+'_image.png')
 
-        if embedded.shape[1]==parser.condition_len:
+        if array.shape[1]==parser.condition_len:
 
-            y_predicted=model(input_=inputs, conditioning=embedded.to(device) ,b_size=inputs.shape[0])
+            y_predicted=model(input_=inputs, conditioning=array.to(device) ,b_size=inputs.shape[0])
 
             y_predicted=y_predicted.to(device)
                             
@@ -590,7 +593,7 @@ def main():
     arguments()
     join_simulationData()  
 
-    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=1000,dropout=0.2,features=1000, Y_prediction_size=2)
+    fwd_test, opt, criterion,scheduler=get_net_resnet(device,hiden_num=1000,dropout=0.1,features=1000, Y_prediction_size=1)
     fwd_test = fwd_test.to(device)
 
     print(fwd_test)
@@ -600,14 +603,14 @@ def main():
     Bert=BERTTextEmbedde(device=device, max_length = parser.batch_size)
 
 
-    date="_RESNET_Bands_27Abr_2e-5_50epc_h1000_f1000_128_MSE_MAXVAL_BertConditional_2out"
+    date="_RESNET_Bands_29Abr_2e-5_5epc_h1000_f1000_64_MSE_MAXVAL_arrayCond_1out"
     PATH = 'trainedModelTM_abs_'+date+'.pth'
 
     loss_values,acc,valid_loss_list,acc_val,score_train=train(opt,
                                                             scheduler,
                                                             criterion,
                                                             fwd_test,
-                                                            ClipEmbedder,
+                                                            Bert,
                                                             device,
                                                             PATH )
 
